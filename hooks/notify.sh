@@ -37,16 +37,21 @@ $last"
     ;;
 esac
 
+# 消息文本一律经 stdin 传给 curl，不走命令行参数：Windows Git Bash 调用原生
+# curl.exe 时，MSYS→Win32 的 argv 编码转换会损坏非 ASCII 的 UTF-8 字节，
+# Telegram/Discord 会以 400 "not UTF-8" 拒收
+
 # ---- Telegram ----
 if [ -n "${TELEGRAM_BOT_TOKEN:-}" ] && [ -n "${TELEGRAM_CHAT_ID:-}" ]; then
-  curl -sS -m 5 "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
-    -d chat_id="${TELEGRAM_CHAT_ID}" --data-urlencode text="$msg" >/dev/null 2>&1
+  printf '%s' "$msg" | curl -sS -m 5 \
+    "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+    -d chat_id="${TELEGRAM_CHAT_ID}" --data-urlencode text@- >/dev/null 2>&1
 fi
 
 # ---- Discord webhook ----
 if [ -n "${DISCORD_WEBHOOK_URL:-}" ]; then
-  curl -sS -m 5 -H "Content-Type: application/json" \
-    -d "{\"content\": $(printf '%s' "$msg" | jq -Rs .)}" \
+  printf '%s' "$msg" | jq -Rs '{content: .}' | curl -sS -m 5 \
+    -H "Content-Type: application/json" --data-binary @- \
     "$DISCORD_WEBHOOK_URL" >/dev/null 2>&1
 fi
 
