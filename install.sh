@@ -40,9 +40,9 @@ jq --arg sl "$STATUSLINE_CMD" --arg notify "$NOTIFY_CMD" '
   .statusLine = {type: "command", command: $sl}
   | .hooks.Notification = ((.hooks.Notification // []) | strip_ours)
       + [{matcher: "permission_prompt|idle_prompt",
-          hooks: [{type: "command", command: $notify, timeout: 10}]}]
+          hooks: [{type: "command", command: $notify, timeout: 30}]}]
   | .hooks.Stop = ((.hooks.Stop // []) | strip_ours)
-      + [{hooks: [{type: "command", command: $notify, timeout: 10}]}]
+      + [{hooks: [{type: "command", command: $notify, timeout: 30}]}]
 ' "$SETTINGS" > "$tmp"
 mv "$tmp" "$SETTINGS"
 

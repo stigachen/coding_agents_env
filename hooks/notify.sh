@@ -100,7 +100,9 @@ terminal_is_focused() {
       [ -f "$SCRIPT_DIR/focus_check.ps1" ] || return 1
       wpath=$(cygpath -w "$SCRIPT_DIR/focus_check.ps1" 2>/dev/null)
       [ -n "$wpath" ] || return 1
-      result=$(powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass \
+      # timeout 兜底（Git Bash 自带 coreutils timeout）：检测脚本异常变慢时
+      # 宁可放弃静音判定也不能吃掉 hook 超时预算，否则后续 curl 推送会被强杀
+      result=$(timeout 6 powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass \
         -File "$wpath" -StartPid "$winpid" -MaxIdle "$max_idle" 2>/dev/null \
         | tr -d '\r\n ')
       [ "$result" = "FOCUSED" ]

@@ -46,11 +46,17 @@ if ($fw -eq [CC.Native]::GetConsoleWindow()) { Write-Output 'FOCUSED'; exit 0 }
 # 是 shell 的祖先，沿 StartPid 的父进程链上溯比对
 $fgPid = [uint32]0
 [void][CC.Native]::GetWindowThreadProcessId($fw, [ref]$fgPid)
+# 一次取全进程表建 pid→ppid 映射后在内存里上溯。不能逐跳 Get-CimInstance：
+# 每次查询 ~0.6s，长祖先链会把整个检测拖到近 10 秒，吃光 hook 的超时预算，
+# 导致后续 curl 推送被强杀、通知静默丢失
+$parentOf = @{}
+foreach ($row in (Get-CimInstance Win32_Process -Property ProcessId, ParentProcessId)) {
+  $parentOf[[int]$row.ProcessId] = [int]$row.ParentProcessId
+}
 $p = $StartPid
 for ($i = 0; $i -lt 25 -and $p -gt 4; $i++) {
   if ($p -eq $fgPid) { Write-Output 'FOCUSED'; exit 0 }
-  $proc = Get-CimInstance Win32_Process -Filter "ProcessId=$p"
-  if (-not $proc) { break }
-  $p = [int]$proc.ParentProcessId
+  if (-not $parentOf.ContainsKey($p)) { break }
+  $p = $parentOf[$p]
 }
 Write-Output 'NO'
