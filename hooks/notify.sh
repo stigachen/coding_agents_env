@@ -7,7 +7,9 @@ input=$(cat)
 
 CLAUDE_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 ENV_FILE="$CLAUDE_DIR/notify.env"
-[ -f "$ENV_FILE" ] && . "$ENV_FILE"
+# 去掉 \r 再加载：Windows 编辑器可能把文件存成 CRLF，直接 source 会让
+# 每个值尾部带 \r（token 失效，且 [ -n ] 判空检测不到）
+[ -f "$ENV_FILE" ] && eval "$(tr -d '\r' < "$ENV_FILE")"
 
 event=$(echo "$input" | jq -r '.hook_event_name // empty')
 cwd=$(echo "$input" | jq -r '.cwd // empty')

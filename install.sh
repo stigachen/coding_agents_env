@@ -48,7 +48,8 @@ mv "$tmp" "$SETTINGS"
 
 # ---- notify.env（本机密钥，不入库，仅本人可读）----
 if [ ! -f "$CLAUDE_DIR/notify.env" ]; then
-  cp "$REPO_DIR/hooks/notify.env.example" "$CLAUDE_DIR/notify.env"
+  # tr 而非 cp：Windows 检出可能是 CRLF，归一化为 LF（该文件会被 bash 加载）
+  tr -d '\r' < "$REPO_DIR/hooks/notify.env.example" > "$CLAUDE_DIR/notify.env"
   NOTIFY_ENV_CREATED=1
 else
   NOTIFY_ENV_CREATED=0

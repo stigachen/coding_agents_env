@@ -35,6 +35,16 @@
 `~/.claude/notify.env` 设 `NOTIFY_ON_STOP=0`，只保留"待审批 / 等输入"两类通知 ——
 `idle_prompt` 本身就意味着"Claude 停了 60 秒没人理"，天然等价于"你不在电脑前"。
 
+## Windows (Git Bash) 说明
+
+- Telegram / Discord 通知完全可用；桌面弹窗目前仅 macOS（`DESKTOP_NOTIFY` 在
+  Windows 上自动跳过）。
+- 行尾三层防护：`.gitattributes` 钉住模板为 LF、`install.sh` 生成 `notify.env`
+  时去 `\r`、`notify.sh` 加载时再去一次 —— 即使用 Windows 编辑器把
+  `notify.env` 存成 CRLF 也不会污染 token。
+- `chmod 600` 在 NTFS 上只是尽力而为（实际权限由 Windows ACL 管理，文件在你的
+  用户目录下默认其他用户不可读）。
+
 ## 手工测试
 
 ```bash
