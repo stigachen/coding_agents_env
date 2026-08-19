@@ -78,6 +78,11 @@ Claude Code 所在终端窗口**有键盘焦点**时，跳过所有推送（IM +
   用户目录下默认其他用户不可读）。
 - `focus_check.ps1` 带 UTF-8 BOM 且需保留：Windows PowerShell 5.1 读无 BOM
   脚本时按 ANSI 代码页解码，中文注释会乱码。
+- 推送优先用系统原生 `System32\curl.exe` 而非 Git Bash 自带的 mingw64 curl：
+  hook 是无控制台的分离进程，mingw64 curl 在这种环境下会偶发卡死在进程
+  初始化阶段（自身 `-m` 超时都不生效，直到 hook 超时被整体强杀，通知静默
+  丢失）。排障时设 `NOTIFY_DEBUG=1`，每次事件的判定和推送结果（curl 退出码
+  与响应）会写入 `~/.claude/notify-debug.log`。
 
 ## 手工测试
 
