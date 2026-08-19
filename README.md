@@ -16,7 +16,7 @@ ctx ██████░░░░ 67% | session:3% weekly:9%
 | 目录 | 内容 | 文档 |
 |---|---|---|
 | `statusline/` | 两行状态栏：模型/effort/git 分支 + context 进度条 + 订阅配额（同 `/usage`） | [statusline/README.md](statusline/README.md) |
-| `hooks/` | 待审批 / 等待输入 / 任务完成时推送 Telegram / Discord / macOS 桌面通知 | [hooks/README.md](hooks/README.md) |
+| `hooks/` | 待审批 / 等待输入 / 任务完成时推送 Telegram / Discord / macOS 桌面通知；终端窗口聚焦时自动静音 | [hooks/README.md](hooks/README.md) |
 | `install.sh` | 一键部署：合并 `~/.claude/settings.json`，幂等可重复执行 | — |
 | `CLAUDE.md` | 让 Claude Code 自己会装：描述部署流程与仓库约定 | — |
 

@@ -44,7 +44,8 @@ Windows Git Bash 把 `jq.exe` 放进 PATH。
 - `install.sh` — 一键部署入口（合并 settings.json，幂等）
 - `statusline/` — 两行状态栏：模型/effort/git 分支 + context 进度条 + 订阅配额
 - `hooks/` — `notify.sh`：Notification（待审批/等输入）和 Stop（回合结束）事件
-  推送到 Telegram/Discord/macOS 桌面通知；渠道密钥在 `~/.claude/notify.env`（不入库）
+  推送到 Telegram/Discord/macOS 桌面通知；终端窗口有键盘焦点时自动静音
+  （`focus_check.ps1` 为 Windows 检测端）；渠道密钥在 `~/.claude/notify.env`（不入库）
 
 ## 约定
 
