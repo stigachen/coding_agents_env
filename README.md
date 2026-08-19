@@ -1,8 +1,8 @@
-# cc_statusline → my Claude Code environment
+# cc_dev_env — my Claude Code environment
 
-集中管理我的 [Claude Code](https://docs.claude.com/en/docs/claude-code) 环境定制。
-仓库最初只有状态栏（因此得名），现已扩展为完整的环境定制仓库：clone 到任何新开发机，
-一条命令（或一句提示词）完成部署。
+集中管理我的 [Claude Code](https://docs.claude.com/en/docs/claude-code) 环境定制：
+clone 到任何新开发机，一条命令（或一句提示词）完成部署。
+（仓库曾名 `cc_statusline`，最初只有状态栏，后扩展为完整的环境定制仓库。）
 
 ```
 Fable 5 (effort:high) | my-project | git:main          ← statusline/
@@ -27,7 +27,7 @@ ctx ██████░░░░ 67% | session:3% weekly:9%
 **方式一：让 Claude Code 自己装（推荐）**
 
 ```bash
-git clone https://github.com/<you>/cc_statusline && cd cc_statusline && claude
+git clone https://github.com/stigachen/cc_dev_env && cd cc_dev_env && claude
 ```
 
 然后直接说：

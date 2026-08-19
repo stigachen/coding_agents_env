@@ -1,4 +1,4 @@
-# cc_statusline — Claude Code 环境定制仓库
+# cc_dev_env — Claude Code 环境定制仓库
 
 这个仓库集中管理我个人的 Claude Code 环境定制（statusline、hooks 通知等），
 目标是在任何新开发机上 clone 下来即可一键部署。
