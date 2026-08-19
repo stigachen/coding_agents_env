@@ -3,11 +3,16 @@
 A single-file, dependency-light statusline script for [Claude Code](https://docs.claude.com/en/docs/claude-code) that shows — right at the bottom of your terminal:
 
 ```
-Fable 5 (effort:high) | my-project | git:main | session:3% weekly:9% fable_weekly:15%
+Fable 5 (effort:high) | my-project | git:main
+ctx ██████░░░░ 67% | session:3% weekly:9% fable_weekly:15%
 ```
 
+Line 1:
 - **Model + effort level** — which model you're talking to and its current reasoning effort
 - **Working directory + git branch**
+
+Line 2:
+- **Context bar** — how full the current conversation's context window is, as a 10-segment bar colored green (< 60%) → yellow (60–79%) → red (≥ 80%), from the `context_window` data in the statusline stdin payload
 - **Subscription usage** — the same plan-level quota data you'd get from `/usage` (5-hour session window, 7-day window, and per-model weekly limits), fetched from Anthropic's OAuth usage endpoint
 
 Works on **macOS**, **Windows (Git Bash)**, and **Linux** from the same script.
@@ -21,9 +26,9 @@ This script fills the gap without installing a plugin: it reads your existing Cl
 ## How it works
 
 ```
-Claude Code ──stdin JSON──▶ statusline.sh ──stdout──▶ terminal statusline
+Claude Code ──stdin JSON──▶ statusline.sh ──stdout (2 lines)──▶ terminal statusline
                                  │
-                                 ├─ jq: parse model / effort / cwd from stdin
+                                 ├─ jq: parse model / effort / cwd / context_window from stdin
                                  ├─ git: current branch (--no-optional-locks)
                                  └─ usage:
                                       ├─ cache fresh (< 5 min)? → read cache
@@ -39,7 +44,8 @@ Claude Code ──stdin JSON──▶ statusline.sh ──stdout──▶ termin
 - **Cross-platform via two small shims.**
   - `get_token()` — macOS reads the OAuth credential from the Keychain (`security find-generic-password`); Windows (Git Bash) and Linux read `~/.claude/.credentials.json`.
   - `mtime()` — tries GNU `stat -c %Y`, falls back to BSD `stat -f %m`.
-- **Fail quiet.** If the token can't be read, the API changes shape, or the request times out (3s cap), the usage segment simply disappears — the rest of the statusline still renders.
+- **Fail quiet.** If the token can't be read, the API changes shape, or the request times out (3s cap), the usage segment simply disappears — the rest of the statusline still renders. Same for the context bar: `context_window.used_percentage` can be `null` early in a session, in which case the script recomputes it from `total_input_tokens / context_window_size`, and if that's missing too the bar is omitted.
+- **bash 3.2 compatible.** The context bar is built by slicing two 10-char literals (`${FULL:0:filled}`) instead of appending `█` in a loop — macOS's stock bash 3.2 silently drops bytes when appending multibyte characters one at a time under a UTF-8 locale.
 - **Effort fallback.** Effort is read from the stdin payload (`.effort.level`) when the running Claude Code version provides it, falling back to `effortLevel` in `~/.claude/settings.json` for older versions (the fallback reflects persisted config only, not session-scoped overrides).
 - **Local only.** The token is read at call time, sent only to `api.anthropic.com`, and never written to disk. The cache file contains just the usage response (percentages, reset timestamps) — no credentials.
 
@@ -94,13 +100,14 @@ Both should print a token prefix (typically `sk-ant-oat…`).
 ### 4. Smoke-test without Claude Code
 
 ```bash
-echo '{"model":{"display_name":"Fable 5"},"effort":{"level":"high"},"workspace":{"current_dir":"'$HOME'"}}' | bash ~/.claude/statusline.sh
+echo '{"model":{"display_name":"Fable 5"},"effort":{"level":"high"},"workspace":{"current_dir":"'$HOME'"},"context_window":{"used_percentage":42}}' | bash ~/.claude/statusline.sh
 ```
 
 Expected output (usage appears from the second run once the cache exists):
 
 ```
-Fable 5 (effort:high) | yourname | session:3% weekly:9% fable_weekly:15%
+Fable 5 (effort:high) | yourname
+ctx ████░░░░░░ 42% | session:3% weekly:9% fable_weekly:15%
 ```
 
 ### 5. Restart Claude Code
@@ -131,7 +138,8 @@ The jq block in the script maps `session` → `session:N%`, `weekly_all` → `we
 
 - **Reset countdown** — parse `resets_at` and append e.g. `(rst 1h23m)`. On macOS, avoid BSD `date` parsing pain by converting via `python3 -c "from datetime import datetime; …"` or installing GNU coreutils.
 - **Severity colors** — swap the dim `\033[2m` styling for yellow/red when any limit's `severity` isn't `normal`.
-- **Cost data** — the stdin payload also carries `cost` and `context_window` fields; extra-usage spend lives in the API response's `spend` object.
+- **Cost data** — the stdin payload also carries a `cost` object; extra-usage spend lives in the API response's `spend` object.
+- **Bar width / thresholds** — the context bar is 10 segments with green/yellow/red cut-offs at 60% and 80%; both are one-line tweaks in the "第二行" block.
 
 ## License
 

@@ -21,6 +21,16 @@ if git -C "$dir" --no-optional-locks rev-parse --is-inside-work-tree >/dev/null 
   branch=$(git -C "$dir" --no-optional-locks branch --show-current 2>/dev/null)
 fi
 
+# ---- context 使用率（stdin payload，会话早期可能为 null）----
+ctx_pct=$(echo "$input" | jq -r '.context_window.used_percentage // empty | floor')
+if [ -z "$ctx_pct" ]; then
+  ctx_pct=$(echo "$input" | jq -r '
+    (.context_window // {}) as $c
+    | if ($c.total_input_tokens != null and ($c.context_window_size // 0) > 0)
+      then ($c.total_input_tokens * 100 / $c.context_window_size | floor)
+      else empty end')
+fi
+
 # ---- usage（5 分钟缓存 + 429 退避）----
 CACHE="${TMPDIR:-/tmp}/claude-statusline-usage.json"
 BACKOFF="${TMPDIR:-/tmp}/claude-statusline-usage.backoff"
@@ -77,10 +87,32 @@ if [ -f "$CACHE" ]; then
     ] | join(" ")' "$CACHE" 2>/dev/null)
 fi
 
-# ---- 拼装 ----
-out="$model"
-[ -n "$effort" ] && out="$out (effort:$effort)"
-out="$out | $cwd_display"
-[ -n "$branch" ] && out="$out | git:$branch"
-[ -n "$usage" ] && out="$out | $usage"
-printf '\033[2m%s\033[0m' "$out"
+# ---- 第一行：模型 + effort | 项目 | git 分支 ----
+line1="$model"
+[ -n "$effort" ] && line1="$line1 (effort:$effort)"
+line1="$line1 | $cwd_display"
+[ -n "$branch" ] && line1="$line1 | git:$branch"
+
+# ---- 第二行：context 进度条（绿→黄→红）+ usage ----
+line2=""
+if [ -n "$ctx_pct" ]; then
+  if   [ "$ctx_pct" -ge 80 ]; then color="31"   # 红
+  elif [ "$ctx_pct" -ge 60 ]; then color="33"   # 黄
+  else                             color="32"   # 绿
+  fi
+  filled=$(( ctx_pct / 10 ))
+  [ "$filled" -gt 10 ] && filled=10
+  # 用整串字面量取子串拼进度条：macOS 自带 bash 3.2 在 UTF-8 locale 下
+  # 对多字节字符做逐字符追加（bar="$bar█"）会丢字节
+  FULL="██████████"
+  EMPTY="░░░░░░░░░░"
+  bar="${FULL:0:filled}${EMPTY:0:10-filled}"
+  line2=$(printf 'ctx \033[0;%sm%s\033[0;2m %s%%' "$color" "$bar" "$ctx_pct")
+fi
+if [ -n "$usage" ]; then
+  [ -n "$line2" ] && line2="$line2 | $usage" || line2="$usage"
+fi
+
+printf '\033[2m%s\033[0m' "$line1"
+[ -n "$line2" ] && printf '\n\033[2m%s\033[0m' "$line2"
+exit 0
