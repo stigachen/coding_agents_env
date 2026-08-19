@@ -5,3 +5,5 @@
 # notify.env.example 会被 install.sh 复制为 ~/.claude/notify.env 后被 bash 加载，
 # CRLF 会让每个值尾部带 \r（token 失效且 [ -n ] 判空检测不到）
 *.example text eol=lf
+# PowerShell 对 LF 兼容，统一钉 LF 保持仓库一致
+*.ps1 text eol=lf
