@@ -122,18 +122,31 @@ dbg "event=$event → 推送"
 # curl.exe 时，MSYS→Win32 的 argv 编码转换会损坏非 ASCII 的 UTF-8 字节，
 # Telegram/Discord 会以 400 "not UTF-8" 拒收
 
+# Windows 优先用系统原生 curl：hook 是无控制台的分离进程，mingw64 curl 在这种
+# 环境下会偶发卡死在进程初始化阶段（自身的 -m 超时都不生效，直到 hook 超时被
+# 整体强杀，通知静默丢失）；原生 curl 无此问题。消息数据全走 stdin，
+# 原生 curl 同样不受 MSYS→Win32 argv 编码转换影响
+CURL=curl
+case "$(uname)" in
+  MINGW*|MSYS*|CYGWIN*)
+    [ -x /c/Windows/System32/curl.exe ] && CURL=/c/Windows/System32/curl.exe ;;
+esac
+
 # ---- Telegram ----
 if [ -n "${TELEGRAM_BOT_TOKEN:-}" ] && [ -n "${TELEGRAM_CHAT_ID:-}" ]; then
-  printf '%s' "$msg" | curl -sS -m 5 \
+  tg_out=$(printf '%s' "$msg" | "$CURL" -sS -m 5 \
     "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
-    -d chat_id="${TELEGRAM_CHAT_ID}" --data-urlencode text@- >/dev/null 2>&1
+    -d chat_id="${TELEGRAM_CHAT_ID}" --data-urlencode text@- 2>&1)
+  tg_rc=$?
+  dbg "telegram($CURL) rc=$tg_rc resp=${tg_out:0:120}"
 fi
 
 # ---- Discord webhook ----
 if [ -n "${DISCORD_WEBHOOK_URL:-}" ]; then
-  printf '%s' "$msg" | jq -Rs '{content: .}' | curl -sS -m 5 \
+  dc_out=$(printf '%s' "$msg" | jq -Rs '{content: .}' | "$CURL" -sS -m 5 \
     -H "Content-Type: application/json" --data-binary @- \
-    "$DISCORD_WEBHOOK_URL" >/dev/null 2>&1
+    "$DISCORD_WEBHOOK_URL" 2>&1)
+  dbg "discord($CURL) rc=$? resp=${dc_out:0:120}"
 fi
 
 # ---- 本机桌面通知（macOS，窗口在后台时的轻量提醒）----
