@@ -102,11 +102,17 @@ if [ -n "$ctx_pct" ]; then
   fi
   filled=$(( ctx_pct / 10 ))
   [ "$filled" -gt 10 ] && filled=10
-  # 用整串字面量取子串拼进度条：macOS 自带 bash 3.2 在 UTF-8 locale 下
-  # 对多字节字符做逐字符追加（bar="$bar█"）会丢字节
-  FULL="██████████"
-  EMPTY="░░░░░░░░░░"
-  bar="${FULL:0:filled}${EMPTY:0:10-filled}"
+  # 进度条用 printf 八进制转义逐字节输出（█=\342\226\210 ░=\342\226\221）：
+  # 字节流不经过 shell 的字符处理，输出与 locale 无关（C/POSIX locale 下
+  # 也不会切错），同时绕开 macOS bash 3.2 在 UTF-8 locale 下
+  # 拼接多字节字符（bar="$bar█"）丢字节的 bug
+  bar=$(
+    i=0
+    while [ "$i" -lt 10 ]; do
+      if [ "$i" -lt "$filled" ]; then printf '\342\226\210'; else printf '\342\226\221'; fi
+      i=$(( i + 1 ))
+    done
+  )
   line2=$(printf 'ctx \033[0;%sm%s\033[0;2m %s%%' "$color" "$bar" "$ctx_pct")
 fi
 if [ -n "$usage" ]; then
