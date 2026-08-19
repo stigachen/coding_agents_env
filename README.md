@@ -1,145 +1,91 @@
-# claude-code-statusline
+# cc_statusline → my Claude Code environment
 
-A single-file, dependency-light statusline script for [Claude Code](https://docs.claude.com/en/docs/claude-code) that shows — right at the bottom of your terminal:
-
-```
-Fable 5 (effort:high) | my-project | git:main
-ctx ██████░░░░ 67% | session:3% weekly:9% fable_weekly:15%
-```
-
-Line 1:
-- **Model + effort level** — which model you're talking to and its current reasoning effort
-- **Working directory + git branch**
-
-Line 2:
-- **Context bar** — how full the current conversation's context window is, as a 10-segment bar colored green (< 60%) → yellow (60–79%) → red (≥ 80%), from the `context_window` data in the statusline stdin payload
-- **Subscription usage** — the same plan-level quota data you'd get from `/usage` (5-hour session window, 7-day window, and per-model weekly limits), fetched from Anthropic's OAuth usage endpoint
-
-Works on **macOS**, **Windows (Git Bash)**, and **Linux** from the same script.
-
-## Why
-
-Claude Code's statusline API pipes a JSON payload to your script after each interaction, but that payload only covers session-local data (model, directory, context, cost). Plan-level quota — how much of your 5h / 7d allowance is left — is only visible by manually running `/usage`.
-
-This script fills the gap without installing a plugin: it reads your existing Claude Code OAuth credentials locally and queries the usage endpoint directly, so the numbers in your statusline match `/usage`.
-
-## How it works
+集中管理我的 [Claude Code](https://docs.claude.com/en/docs/claude-code) 环境定制。
+仓库最初只有状态栏（因此得名），现已扩展为完整的环境定制仓库：clone 到任何新开发机，
+一条命令（或一句提示词）完成部署。
 
 ```
-Claude Code ──stdin JSON──▶ statusline.sh ──stdout (2 lines)──▶ terminal statusline
-                                 │
-                                 ├─ jq: parse model / effort / cwd / context_window from stdin
-                                 ├─ git: current branch (--no-optional-locks)
-                                 └─ usage:
-                                      ├─ cache fresh (< 5 min)? → read cache
-                                      └─ else → read OAuth token
-                                               → GET /api/oauth/usage
-                                               → 200: write cache | 429: back off 10 min
+Fable 5 (effort:high) | my-project | git:main          ← statusline/
+ctx ██████░░░░ 67% | session:3% weekly:9%
+
+📱 "🔔 [my-project] Claude 在等你批准一个操作"          ← hooks/
 ```
 
-### Design points
+## 模块
 
-- **Event-driven, not polled.** Claude Code re-runs the script after each assistant reply (plus UI events like `/compact`), with debouncing. The script itself never runs in the background.
-- **5-minute cache + 429 backoff.** Statusline refreshes can be frequent; the usage API call is throttled to at most once per 5 minutes (`TTL=300`), and a 429 response pauses further calls for 10 minutes. Delete the cache file to force a refresh.
-- **Cross-platform via two small shims.**
-  - `get_token()` — macOS reads the OAuth credential from the Keychain (`security find-generic-password`); Windows (Git Bash) and Linux read `~/.claude/.credentials.json`.
-  - `mtime()` — tries GNU `stat -c %Y`, falls back to BSD `stat -f %m`.
-- **Fail quiet.** If the token can't be read, the API changes shape, or the request times out (3s cap), the usage segment simply disappears — the rest of the statusline still renders. Same for the context bar: `context_window.used_percentage` can be `null` early in a session, in which case the script recomputes it from `total_input_tokens / context_window_size`, and if that's missing too the bar is omitted.
-- **Locale-independent rendering.** The context bar is emitted as raw UTF-8 bytes via `printf` octal escapes (`\342\226\210` = `█`, `\342\226\221` = `░`) rather than manipulating multibyte characters as shell strings. This sidesteps two portability traps at once: macOS's stock bash 3.2 silently drops bytes when appending multibyte characters under a UTF-8 locale, and character-based substring slicing miscounts under C/POSIX locales (bytes vs characters). Output is byte-identical across macOS / Git Bash / Linux and any locale; a `.gitattributes` pins `*.sh` to LF so Windows checkouts with `core.autocrlf=true` can't break the script.
-- **Effort fallback.** Effort is read from the stdin payload (`.effort.level`) when the running Claude Code version provides it, falling back to `effortLevel` in `~/.claude/settings.json` for older versions (the fallback reflects persisted config only, not session-scoped overrides).
-- **Local only.** The token is read at call time, sent only to `api.anthropic.com`, and never written to disk. The cache file contains just the usage response (percentages, reset timestamps) — no credentials.
+| 目录 | 内容 | 文档 |
+|---|---|---|
+| `statusline/` | 两行状态栏：模型/effort/git 分支 + context 进度条 + 订阅配额（同 `/usage`） | [statusline/README.md](statusline/README.md) |
+| `hooks/` | 待审批 / 等待输入 / 任务完成时推送 Telegram / Discord / macOS 桌面通知 | [hooks/README.md](hooks/README.md) |
+| `install.sh` | 一键部署：合并 `~/.claude/settings.json`，幂等可重复执行 | — |
+| `CLAUDE.md` | 让 Claude Code 自己会装：描述部署流程与仓库约定 | — |
 
-### Requirements
+## 安装
 
-- `bash`, `curl`, `git` — preinstalled on macOS and Git Bash
-- [`jq`](https://jqlang.github.io/jq/) — `brew install jq` on macOS; on Windows drop `jq.exe` into a directory on your `PATH` (e.g. `C:\Program Files\Git\usr\bin\`)
-- A Claude **Pro / Max / Team subscription** signed in via OAuth. API-key, Bedrock, and Vertex setups have no subscription quota, so the usage segment won't appear (the rest still works).
+新机器上两种方式任选：
 
-## Install
-
-### 1. Get the script
+**方式一：让 Claude Code 自己装（推荐）**
 
 ```bash
-curl -o ~/.claude/statusline.sh https://raw.githubusercontent.com/<you>/<repo>/main/statusline.sh
-chmod +x ~/.claude/statusline.sh
+git clone https://github.com/<you>/cc_statusline && cd cc_statusline && claude
 ```
 
-Or clone and copy. **Windows note:** keep the file LF-ended, UTF-8 without BOM. CRLF line endings are the #1 cause of `\r: command not found` errors in Git Bash.
+然后直接说：
 
-### 2. Point Claude Code at it
+> 帮我把这个目录所有的配置安装到这个电脑上
 
-In `~/.claude/settings.json`:
+Claude 会按 `CLAUDE.md` 里的流程执行 `install.sh`、做冒烟验证、并提醒你补齐
+IM token 等本机配置。
 
-```json
-{
-  "statusLine": {
-    "type": "command",
-    "command": "bash ~/.claude/statusline.sh"
-  }
-}
-```
-
-### 3. Verify credentials access
-
-**macOS**
+**方式二：手动**
 
 ```bash
-security find-generic-password -s "Claude Code-credentials" -w | jq -r '.claudeAiOauth.accessToken' | head -c 20
+bash install.sh
 ```
 
-The first run may pop a Keychain authorization dialog — choose **Always Allow**, otherwise every statusline refresh will prompt. If the entry isn't found, list candidates with `security dump-keychain | grep -i claude` and adjust the `-s` service name in `get_token()`.
+两种方式都是幂等的。安装后：
 
-**Windows (Git Bash) / Linux**
+1. 编辑 `~/.claude/notify.env` 填入 Telegram bot token / Discord webhook（IM 通知才会生效）
+2. macOS 首次运行状态栏会弹 Keychain 授权，选 **Always Allow**
+3. 重启 Claude Code，用 `/hooks` 确认 hooks 已注册
+
+**依赖**：`bash` `curl` `git` `jq`（macOS: `brew install jq`；Windows Git Bash:
+把 `jq.exe` 放进 PATH）。支持 macOS / Windows (Git Bash) / Linux。
+
+### 设计要点
+
+- **settings 指向仓库内脚本的绝对路径，不拷贝文件。** `git pull` 后定制即生效，
+  无需重新安装（仓库移动位置后重跑一次 `install.sh` 即可）。
+- **合并而非覆盖。** `install.sh` 用 jq 把配置合并进 `~/.claude/settings.json`，
+  只增删本仓库自己的条目，不碰你手工配置的其他 hooks / 设置。
+- **密钥不入库。** IM token 等放 `~/.claude/notify.env`（每台机器各自填写），
+  仓库里只有 `notify.env.example` 模板。
+
+## 更新
 
 ```bash
-jq -r '.claudeAiOauth.accessToken' ~/.claude/.credentials.json | head -c 20
+git pull   # 脚本改动即刻生效
+# 仅当 install.sh 本身或 settings 结构有变化时才需要重跑：
+bash install.sh
 ```
 
-Both should print a token prefix (typically `sk-ant-oat…`).
+## Roadmap：还能定制什么
 
-### 4. Smoke-test without Claude Code
+Claude Code 几乎所有环境面都可以放进这个仓库统一管理，按需增加子目录 +
+`install.sh` 中对应的部署段即可（约定见 `CLAUDE.md`）：
 
-```bash
-echo '{"model":{"display_name":"Fable 5"},"effort":{"level":"high"},"workspace":{"current_dir":"'$HOME'"},"context_window":{"used_percentage":42}}' | bash ~/.claude/statusline.sh
-```
-
-Expected output (usage appears from the second run once the cache exists):
-
-```
-Fable 5 (effort:high) | yourname
-ctx ████░░░░░░ 42% | session:3% weekly:9% fable_weekly:15%
-```
-
-### 5. Restart Claude Code
-
-Open a new session and send a message — the statusline renders after the first reply.
-
-## Usage endpoint & response shape
-
-The script calls `GET https://api.anthropic.com/api/oauth/usage` with your OAuth access token and the `anthropic-beta: oauth-2025-04-20` header. The response contains a `limits` array; each entry looks like:
-
-| field | meaning |
-|---|---|
-| `kind` | `session` (5h rolling window), `weekly_all` (7d, all models), `weekly_scoped` (7d, one model — see `scope.model`) |
-| `percent` | utilization as an integer percentage (already ×100) |
-| `resets_at` | ISO timestamp of the next window reset |
-| `severity` | `normal` under no pressure; other values under quota pressure |
-| `is_active` | whether this limit currently binds |
-
-The jq block in the script maps `session` → `session:N%`, `weekly_all` → `weekly:N%`, and `weekly_scoped` → `<model>_weekly:N%`. Rename the labels there to taste.
-
-## ⚠️ Caveats
-
-- **Undocumented endpoint.** `/api/oauth/usage` is not part of Anthropic's public API. Field names or the endpoint itself may change or disappear without notice. When that happens the usage segment silently drops out; fix by inspecting the new response (`jq . <cache-file>`) and updating the jq block.
-- **Numbers refresh on interaction, not on a timer.** If a window resets while you're idle, the statusline shows stale percentages until your next message. Live countdowns are out of scope for the statusline mechanism.
-- **Per-machine credentials, account-wide numbers.** The token is machine-local, but the quota it reports is your account's — usage from other devices is already included.
-
-## Customization ideas
-
-- **Reset countdown** — parse `resets_at` and append e.g. `(rst 1h23m)`. On macOS, avoid BSD `date` parsing pain by converting via `python3 -c "from datetime import datetime; …"` or installing GNU coreutils.
-- **Severity colors** — swap the dim `\033[2m` styling for yellow/red when any limit's `severity` isn't `normal`.
-- **Cost data** — the stdin payload also carries a `cost` object; extra-usage spend lives in the API response's `spend` object.
-- **Bar width / thresholds** — the context bar is 10 segments with green/yellow/red cut-offs at 60% and 80%; both are one-line tweaks in the "第二行" block.
+- **`memory/` → `~/.claude/CLAUDE.md`** — 全局记忆/偏好：代码风格、常用回复语言、
+  个人约定，所有项目生效
+- **`skills/` → `~/.claude/skills/`** — 自定义斜杠命令（skill）：把常用工作流
+  （发布检查、周报生成、代码走查清单）做成 `/命令`
+- **`agents/` → `~/.claude/agents/`** — 自定义 subagent：预设专用系统提示词和
+  工具白名单的子代理
+- **`settings/permissions`** — 权限白名单：把常用只读命令加进 allowlist，
+  减少审批弹窗（可用内置 `/fewer-permission-prompts` 生成初稿）
+- **`keybindings.json` → `~/.claude/keybindings.json`** — 自定义快捷键
+- **`mcp/`** — 常用 MCP server 清单（`claude mcp add` 脚本化，或项目级 `.mcp.json`）
+- **更多 hooks** — 如 `PreToolUse` 做危险命令拦截、`PostToolUse` 自动 format、
+  `SessionStart` 注入上下文
 
 ## License
 
