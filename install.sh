@@ -31,6 +31,8 @@ chmod +x "$REPO_DIR"/statusline/*.sh "$REPO_DIR"/hooks/*.sh 2>/dev/null || true
 # ---- 合并 settings.json ----
 # statusLine 直接覆盖；hooks 先移除本仓库旧条目（按 notify.sh 路径特征识别）再追加，
 # 不影响用户手工配置的其他 hooks。
+# Notification 不设 matcher（放行所有通知类型）：哪些类型要推送由 notify.sh 读
+# notify.env 里的开关决定，这样部署一次后调整开关只改 notify.env、即时生效。
 STATUSLINE_CMD="bash \"$REPO_DIR/statusline/statusline.sh\""
 NOTIFY_CMD="bash \"$REPO_DIR/hooks/notify.sh\""
 
@@ -39,8 +41,7 @@ jq --arg sl "$STATUSLINE_CMD" --arg notify "$NOTIFY_CMD" '
   def strip_ours: map(select([.hooks[]?.command // ""] | any(contains("/hooks/notify.sh")) | not));
   .statusLine = {type: "command", command: $sl}
   | .hooks.Notification = ((.hooks.Notification // []) | strip_ours)
-      + [{matcher: "permission_prompt|idle_prompt",
-          hooks: [{type: "command", command: $notify, timeout: 30}]}]
+      + [{hooks: [{type: "command", command: $notify, timeout: 30}]}]
   | .hooks.Stop = ((.hooks.Stop // []) | strip_ours)
       + [{hooks: [{type: "command", command: $notify, timeout: 30}]}]
 ' "$SETTINGS" > "$tmp"
@@ -53,6 +54,18 @@ if [ ! -f "$CLAUDE_DIR/notify.env" ]; then
   NOTIFY_ENV_CREATED=1
 else
   NOTIFY_ENV_CREATED=0
+  # 已存在：补齐模板后来新增的开关（只追加缺失的 KEY=默认值，不动已填的值）
+  appended=""
+  while IFS= read -r line; do
+    key=${line%%=*}
+    if ! grep -q "^${key}=" "$CLAUDE_DIR/notify.env"; then
+      [ -n "$appended" ] || printf '\n# ---- install.sh 补齐的新开关（含义见仓库 hooks/notify.env.example）----\n' \
+        >> "$CLAUDE_DIR/notify.env"
+      printf '%s\n' "$line" >> "$CLAUDE_DIR/notify.env"
+      appended=1
+    fi
+  done < <(tr -d '\r' < "$REPO_DIR/hooks/notify.env.example" | grep '^[A-Z_][A-Z_]*=')
+  [ -z "$appended" ] || echo "ℹ️  已向 $CLAUDE_DIR/notify.env 追加新增开关（默认值，可按需修改）"
 fi
 chmod 600 "$CLAUDE_DIR/notify.env" 2>/dev/null || true
 

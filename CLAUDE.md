@@ -13,7 +13,8 @@
    - 在 `~/.claude/settings.json` 写入 statusLine 配置和 Notification/Stop hooks，
      命令指向本仓库内脚本的绝对路径（git pull 即生效，不拷贝文件）
    - 若 `~/.claude/notify.env` 不存在，从 `hooks/notify.env.example` 生成模板
-     并 chmod 600
+     并 chmod 600；已存在则自动补齐模板新增的开关（追加缺失的 KEY=默认值，
+     不动已填的值）
 2. **交互式收集通知渠道配置**。检查 `~/.claude/notify.env`：若关键项均为空
    （TELEGRAM_BOT_TOKEN / DISCORD_WEBHOOK_URL 都没填），在对话中询问用户：
    - 用哪个通知渠道？（Telegram / Discord / 两者 / 暂不配置）
@@ -21,7 +22,10 @@
      @BotFather 建 bot；给 bot 发条消息后访问
      `https://api.telegram.org/bot<TOKEN>/getUpdates` 查 chat_id）；
      Discord 要 webhook URL（服务器设置 → 整合 → Webhook）
-   - 是否开启回合结束通知（NOTIFY_ON_STOP，默认 1）和 macOS 桌面弹窗（DESKTOP_NOTIFY）
+   - 是否开启回合结束通知（NOTIFY_ON_STOP，默认 1）和 macOS 桌面弹窗（DESKTOP_NOTIFY）。
+     其余开关（NOTIFY_ON_PERMISSION / NOTIFY_ON_IDLE / 前台静音等，全表见
+     hooks/README.md）默认值即合理，不要逐一询问；告知用户以后随时改
+     `~/.claude/notify.env` 即可，即时生效
    把用户的回答写入 `~/.claude/notify.env`（保持 KEY=VALUE 格式，chmod 600）。
    用户选"暂不配置"则跳过，不要反复追问。
    凭据处理纪律：token 只写入该文件，不回显完整值、不写进仓库任何文件、
@@ -45,12 +49,17 @@ Windows Git Bash 把 `jq.exe` 放进 PATH。
 - `statusline/` — 两行状态栏：模型/effort/git 分支 + context 进度条 + 订阅配额
 - `hooks/` — `notify.sh`：Notification（待审批/等输入）和 Stop（回合结束）事件
   推送到 Telegram/Discord/macOS 桌面通知；终端窗口有键盘焦点时自动静音
-  （`focus_check.ps1` 为 Windows 检测端）；渠道密钥在 `~/.claude/notify.env`（不入库）
+  （`focus_check.ps1` 为 Windows 检测端）；渠道密钥和**所有通知开关**都在
+  `~/.claude/notify.env`（不入库）——部署后启停各类通知只改这一个文件，
+  即时生效（install.sh 重跑时会自动补齐模板新增的开关）
 
 ## 约定
 
 - 所有 `*.sh` 必须 LF 结尾、兼容 bash 3.2（macOS 自带）与 Git Bash（Windows），
   多字节字符输出用 printf 八进制转义（原因见 statusline/README.md）
 - 密钥（IM token 等）一律放 `~/.claude/notify.env` 这类机器本地文件，绝不进仓库
+- 通知行为的开关一律加在 `notify.env`（由 `notify.sh` 运行时读取、带默认值），
+  不要做进 settings.json 的 matcher——保证部署一次后调开关只改 notify.env、
+  即时生效，不需要重装或重启
 - 新增定制模块时：脚本放独立子目录，部署逻辑加进 `install.sh` 并保持幂等，
   同步更新本文件和 README.md

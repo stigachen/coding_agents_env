@@ -60,6 +60,9 @@ bash install.sh
   只增删本仓库自己的条目，不碰你手工配置的其他 hooks / 设置。
 - **密钥不入库。** IM token 等放 `~/.claude/notify.env`（每台机器各自填写），
   仓库里只有 `notify.env.example` 模板。
+- **开关全在 notify.env。** 部署一次后，各类通知的启停（待审批 / 等输入 /
+  回合结束 / 前台静音 / 桌面弹窗）都只改 `~/.claude/notify.env`，即时生效，
+  不用碰 settings.json、不用重装。重跑 `install.sh` 会自动补齐模板新增的开关。
 
 ## 更新
 
