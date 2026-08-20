@@ -18,7 +18,7 @@ project=$(basename "${cwd:-unknown}")
 
 case "$event" in
   Stop)
-    # Stop 每个回合都触发；置 NOTIFY_ON_STOP=0 可只保留审批/等待通知
+    # Stop 每个回合都触发；置 NOTIFY_ON_STOP=0 可只保留待审批/等输入通知
     [ "${NOTIFY_ON_STOP:-1}" = "0" ] && exit 0
     # 摘要必须按字符（codepoint）截断，不能用 head -c：按字节截会把 UTF-8
     # 多字节字符切成两半，Telegram 会以 400 "strings must be encoded in UTF-8"
@@ -29,11 +29,18 @@ case "$event" in
 $last"
     ;;
   Notification)
+    # 类型级开关全在 notify.env（settings 的 matcher 放行所有类型），
+    # 部署一次后启停各类通知只需改 notify.env，即时生效
     ntype=$(echo "$input" | jq -r '.notification_type // "notification"')
     case "$ntype" in
-      permission_prompt) msg="🔔 [$project] Claude 在等你批准一个操作" ;;
-      idle_prompt)       msg="⏸️ [$project] Claude 已停下，等待你的输入" ;;
-      *)                 msg="🔔 [$project] Claude 通知：$ntype" ;;
+      permission_prompt)
+        [ "${NOTIFY_ON_PERMISSION:-1}" = "0" ] && exit 0
+        msg="🔔 [$project] Claude 在等你批准一个操作" ;;
+      idle_prompt)
+        [ "${NOTIFY_ON_IDLE:-1}" = "0" ] && exit 0
+        msg="⏸️ [$project] Claude 已停下，等待你的输入" ;;
+      *)
+        msg="🔔 [$project] Claude 通知：$ntype" ;;
     esac
     ;;
   *)

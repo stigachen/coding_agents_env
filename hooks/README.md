@@ -31,10 +31,23 @@
 - **macOS 桌面通知**：`DESKTOP_NOTIFY=1`。人在电脑前但窗口在后台时的轻量提醒
   （`osascript`，无外网依赖）。
 
-## 降噪
+## 开关与降噪
 
-`Stop` 每个回合都触发，包括你在旁边正常交互的短回合。嫌吵可在
-`~/.claude/notify.env` 设 `NOTIFY_ON_STOP=0`，只保留"待审批 / 等输入"两类通知 ——
+**所有开关集中在 `~/.claude/notify.env`，改完即时生效**（下次事件触发时读取），
+无需重跑 `install.sh`、也无需重启会话。settings.json 里的 hook 不设 matcher
+过滤，事件先到 `notify.sh` 再按开关决定推不推：
+
+| 开关 | 默认 | 作用 |
+|---|---|---|
+| `NOTIFY_ON_PERMISSION` | 1 | 待审批通知（`permission_prompt`） |
+| `NOTIFY_ON_IDLE` | 1 | 等输入通知（`idle_prompt`） |
+| `NOTIFY_ON_STOP` | 1 | 回合结束通知（`Stop`） |
+| `NOTIFY_SKIP_WHEN_FOCUSED` | 1 | 前台静音（见下文） |
+| `NOTIFY_FOCUS_MAX_IDLE` | 120 | 前台静音的"人已走开"阈值（秒） |
+| `DESKTOP_NOTIFY` | 0 | macOS 本机桌面弹窗 |
+
+`Stop` 每个回合都触发，包括你在旁边正常交互的短回合。嫌吵可设
+`NOTIFY_ON_STOP=0`，只保留"待审批 / 等输入"两类通知 ——
 `idle_prompt` 本身就意味着"Claude 停了 60 秒没人理"，天然等价于"你不在电脑前"。
 
 ### 前台静音（默认开启）
