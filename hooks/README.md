@@ -49,6 +49,7 @@
 | `DESKTOP_NOTIFY` | 0 | macOS 本机桌面弹窗 |
 | `NOTIFY_SHOW_HOST` | 1 | 消息前缀带主机名 `[项目@主机]` |
 | `NOTIFY_FROM_GROK` | 0 | 是否推送 Grok CLI 触发的事件（见下文） |
+| `NOTIFY_DEBUG` | 0 | 排障日志，写入 `~/.claude/notify-debug.log` |
 
 `Stop` 每个回合都触发，包括你在旁边正常交互的短回合。嫌吵可设
 `NOTIFY_ON_STOP=0`，只保留"待审批 / 等输入"两类通知 ——
