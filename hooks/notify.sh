@@ -12,9 +12,32 @@ ENV_FILE="$CLAUDE_DIR/notify.env"
 # 每个值尾部带 \r（token 失效，且 [ -n ] 判空检测不到）
 [ -f "$ENV_FILE" ] && eval "$(tr -d '\r' < "$ENV_FILE")"
 
+# ---- 调用方识别：Claude Code 还是 Grok CLI ----
+# xAI 的 Grok CLI 有 "Claude Code 兼容" 功能（compat.claude.hooks，默认开），
+# 会原样执行 ~/.claude/settings.json 里的 hooks，于是 Grok 的每个回合也会跑到
+# 这里。它每次调 hook 都注入 GROK_HOOK_EVENT 环境变量，据此识别。
+# 默认（NOTIFY_FROM_GROK=0）直接忽略 Grok 的事件；设 1 则照常推送，消息里
+# 标成 "Grok" 而非 "Claude"。Grok 的 stdin 载荷是 camelCase
+# （notificationType / lastAssistantMessage），下面读字段时两种写法都兼容
+agent="Claude"
+if [ -n "${GROK_HOOK_EVENT:-}" ]; then
+  [ "${NOTIFY_FROM_GROK:-0}" = "1" ] || exit 0
+  agent="Grok"
+fi
+
 event=$(echo "$input" | jq -r '.hook_event_name // empty')
 cwd=$(echo "$input" | jq -r '.cwd // empty')
 project=$(basename "${cwd:-unknown}")
+
+# 多台机器共用一个 IM 渠道时靠主机名区分来源：[项目@主机]。
+# hostname 在 macOS / Linux / Git Bash 下都有；去掉域名后缀只留短名。
+# NOTIFY_SHOW_HOST=0 恢复只显示项目名
+tag="$project"
+if [ "${NOTIFY_SHOW_HOST:-1}" = "1" ]; then
+  host=$(hostname 2>/dev/null || echo "${HOSTNAME:-${COMPUTERNAME:-}}")
+  host=${host%%.*}
+  [ -n "$host" ] && tag="$project@$host"
+fi
 
 case "$event" in
   Stop)
@@ -23,24 +46,24 @@ case "$event" in
     # 摘要必须按字符（codepoint）截断，不能用 head -c：按字节截会把 UTF-8
     # 多字节字符切成两半，Telegram 会以 400 "strings must be encoded in UTF-8"
     # 拒收整条消息（中文消息约 2/3 概率踩中）。jq 的字符串切片按字符算
-    last=$(echo "$input" | jq -r '(.last_assistant_message // "")[0:120]')
-    msg="✅ [$project] Claude 任务完成"
+    last=$(echo "$input" | jq -r '(.last_assistant_message // .lastAssistantMessage // "")[0:120]')
+    msg="✅ [$tag] $agent 任务完成"
     [ -n "$last" ] && msg="$msg
 $last"
     ;;
   Notification)
     # 类型级开关全在 notify.env（settings 的 matcher 放行所有类型），
     # 部署一次后启停各类通知只需改 notify.env，即时生效
-    ntype=$(echo "$input" | jq -r '.notification_type // "notification"')
+    ntype=$(echo "$input" | jq -r '.notification_type // .notificationType // "notification"')
     case "$ntype" in
       permission_prompt)
         [ "${NOTIFY_ON_PERMISSION:-1}" = "0" ] && exit 0
-        msg="🔔 [$project] Claude 在等你批准一个操作" ;;
+        msg="🔔 [$tag] $agent 在等你批准一个操作" ;;
       idle_prompt)
         [ "${NOTIFY_ON_IDLE:-1}" = "0" ] && exit 0
-        msg="⏸️ [$project] Claude 已停下，等待你的输入" ;;
+        msg="⏸️ [$tag] $agent 已停下，等待你的输入" ;;
       *)
-        msg="🔔 [$project] Claude 通知：$ntype" ;;
+        msg="🔔 [$tag] $agent 通知：$ntype" ;;
     esac
     ;;
   *)
@@ -125,7 +148,7 @@ if terminal_is_focused; then
   dbg "event=$event → 静音跳过"
   exit 0
 fi
-dbg "event=$event → 推送"
+dbg "event=$event agent=$agent tag=$tag → 推送: $(printf '%s' "$msg" | head -1)"
 
 # 消息文本一律经 stdin 传给 curl，不走命令行参数：Windows Git Bash 调用原生
 # curl.exe 时，MSYS→Win32 的 argv 编码转换会损坏非 ASCII 的 UTF-8 字节，

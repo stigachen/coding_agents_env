@@ -8,7 +8,7 @@ clone 到任何新开发机，一条命令（或一句提示词）完成部署�
 Fable 5 (effort:high) | my-project | git:main          ← statusline/
 ctx ██████░░░░ 67% | session:3% weekly:9%
 
-📱 "🔔 [my-project] Claude 在等你批准一个操作"          ← hooks/
+📱 "🔔 [my-project@mac-mini] Claude 在等你批准一个操作" ← hooks/
 ```
 
 ## 模块
