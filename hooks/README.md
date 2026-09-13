@@ -4,9 +4,11 @@
 
 | 事件 | 触发时机 | 通知内容 |
 |---|---|---|
-| `Notification` / `permission_prompt` | 权限提示弹出约 6 秒无人处理 | 🔔 [项目] Claude 在等你批准一个操作 |
-| `Notification` / `idle_prompt` | 回合结束后约 60 秒无输入 | ⏸️ [项目] Claude 已停下，等待你的输入 |
-| `Stop` | 每个回合结束 | ✅ [项目] Claude 任务完成 + 最后回复摘要 |
+| `Notification` / `permission_prompt` | 权限提示弹出约 6 秒无人处理 | 🔔 [项目@主机] Claude 在等你批准一个操作 |
+| `Notification` / `idle_prompt` | 回合结束后约 60 秒无输入 | ⏸️ [项目@主机] Claude 已停下，等待你的输入 |
+| `Stop` | 每个回合结束 | ✅ [项目@主机] Claude 任务完成 + 最后回复摘要 |
+
+前缀里的主机名用于多台机器共用一个 IM 渠道时分辨来源（`NOTIFY_SHOW_HOST=0` 可去掉）。
 
 ## 组成
 
@@ -45,10 +47,30 @@
 | `NOTIFY_SKIP_WHEN_FOCUSED` | 1 | 前台静音（见下文） |
 | `NOTIFY_FOCUS_MAX_IDLE` | 120 | 前台静音的"人已走开"阈值（秒） |
 | `DESKTOP_NOTIFY` | 0 | macOS 本机桌面弹窗 |
+| `NOTIFY_SHOW_HOST` | 1 | 消息前缀带主机名 `[项目@主机]` |
+| `NOTIFY_FROM_GROK` | 0 | 是否推送 Grok CLI 触发的事件（见下文） |
 
 `Stop` 每个回合都触发，包括你在旁边正常交互的短回合。嫌吵可设
 `NOTIFY_ON_STOP=0`，只保留"待审批 / 等输入"两类通知 ——
 `idle_prompt` 本身就意味着"Claude 停了 60 秒没人理"，天然等价于"你不在电脑前"。
+
+### 来自 Grok CLI 的事件（默认忽略）
+
+xAI 的 Grok CLI 带 "Claude Code 兼容" 功能（`~/.grok/config.toml` 里
+`[compat.claude] hooks`，默认开），会原样执行 `~/.claude/settings.json` 中的
+hooks——于是 Grok 的每个回合结束、每条 idle 提示也会跑到 `notify.sh`，推出
+一堆没有正文、类型显示为 `notification` 的"Claude 任务完成"（Grok 的载荷是
+camelCase：`lastAssistantMessage` / `notificationType`，且 Grok 会话结束时也
+触发一次 `Stop`）。
+
+`notify.sh` 通过 Grok 为每个 hook 注入的 `GROK_HOOK_EVENT` 环境变量识别调用方：
+
+- `NOTIFY_FROM_GROK=0`（默认）：Grok 触发的事件一律忽略，Claude Code 的不受影响。
+- `NOTIFY_FROM_GROK=1`：照常推送，消息里标成 "Grok"，字段按 camelCase 读取，
+  `NOTIFY_ON_*` 各开关同样生效。
+
+不想让 Grok 碰 Claude 的 hooks，也可以在 Grok 侧关掉：`~/.grok/config.toml`
+加 `[compat.claude]` / `hooks = false`，或设环境变量 `GROK_CLAUDE_HOOKS_ENABLED=0`。
 
 ### 前台静音（默认开启）
 
@@ -105,7 +127,9 @@ Claude Code 所在终端窗口**有键盘焦点**时，跳过所有推送（IM +
 ```bash
 echo '{"hook_event_name":"Notification","notification_type":"permission_prompt","cwd":"'$PWD'"}' | bash notify.sh
 echo '{"hook_event_name":"Stop","last_assistant_message":"测试消息","cwd":"'$PWD'"}' | bash notify.sh
+# 模拟 Grok 调用：默认应无任何推送；notify.env 设 NOTIFY_FROM_GROK=1 后会收到标为 Grok 的消息
+echo '{"hook_event_name":"Stop","lastAssistantMessage":"来自 Grok","cwd":"'$PWD'"}' | GROK_HOOK_EVENT=stop bash notify.sh
 ```
 
-配置了渠道的话，手机应立刻收到两条通知。在 Claude Code 里用 `/hooks`
+配置了渠道的话，手机应立刻收到前两条通知（第三条默认静默）。在 Claude Code 里用 `/hooks`
 确认 `Notification` 和 `Stop` 已注册。

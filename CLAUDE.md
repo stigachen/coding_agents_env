@@ -51,7 +51,9 @@ Windows Git Bash 把 `jq.exe` 放进 PATH。
   推送到 Telegram/Discord/macOS 桌面通知；终端窗口有键盘焦点时自动静音
   （`focus_check.ps1` 为 Windows 检测端）；渠道密钥和**所有通知开关**都在
   `~/.claude/notify.env`（不入库）——部署后启停各类通知只改这一个文件，
-  即时生效（install.sh 重跑时会自动补齐模板新增的开关）
+  即时生效（install.sh 重跑时会自动补齐模板新增的开关）。消息前缀带主机名
+  （多机共用渠道时区分来源）；xAI Grok CLI 会执行 Claude 的 hooks，其事件
+  默认被忽略（`NOTIFY_FROM_GROK`）
 
 ## 约定
 
