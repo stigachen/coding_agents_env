@@ -46,7 +46,7 @@ bash install.sh
 两种方式都是幂等的。安装后：
 
 1. 编辑 `~/.claude/notify.env` 填入 Telegram bot token / Discord webhook（IM 通知才会生效）
-2. macOS 首次运行状态栏会弹 Keychain 授权，选 **Always Allow**
+2. macOS 若弹出 Keychain 授权，选 **Always Allow**（新版 Claude Code 直接把配额喂给状态栏，通常不会弹；不授权也会自动回退读 `~/.claude/.credentials.json`）
 3. 重启 Claude Code，用 `/hooks` 确认 hooks 已注册
 
 **依赖**：`bash` `curl` `git` `jq`（macOS: `brew install jq`；Windows Git Bash:

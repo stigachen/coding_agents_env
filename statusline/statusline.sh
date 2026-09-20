@@ -31,22 +31,36 @@ if [ -z "$ctx_pct" ]; then
       else empty end')
 fi
 
-# ---- usage（5 分钟缓存 + 429 退避）----
+# ---- usage：两路并行 ----
+# 路 1（优先）：Claude Code 直接把订阅配额放进 stdin 的 rate_limits（Pro/Max，
+# 会话首个 API 响应之后出现）→ session / weekly，不需要 token、不联网、无授权弹窗
+stdin_usage=$(echo "$input" | jq -r '
+  [ (.rate_limits.five_hour.used_percentage // empty | "session:" + (floor|tostring) + "%"),
+    (.rate_limits.seven_day.used_percentage // empty | "weekly:"  + (floor|tostring) + "%") ]
+  | join(" ")' 2>/dev/null)
+
+# 路 2：用本机 OAuth token 查用量接口（5 分钟缓存 + 429 退避）。stdin 里没有
+# 按模型的周配额（fable_weekly 等），这一项只能从接口拿；stdin 完全没给
+# rate_limits 时（老版本 Claude Code / 会话首个响应之前）三项也都从这里取
 CACHE="${TMPDIR:-/tmp}/claude-statusline-usage.json"
 BACKOFF="${TMPDIR:-/tmp}/claude-statusline-usage.backoff"
 TTL=300
-usage=""
 
 get_token() {
+  local t=""
   if [ "$IS_MAC" = "1" ]; then
-    # macOS: 凭据存在 Keychain
-    security find-generic-password -s "Claude Code-credentials" -w 2>/dev/null \
-      | jq -r '.claudeAiOauth.accessToken // empty'
-  else
-    # Windows (Git Bash) / Linux: 凭据文件
-    jq -r '.claudeAiOauth.accessToken // empty' \
-      "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/.credentials.json" 2>/dev/null
+    # macOS：Claude Code 把凭据存在 Keychain。但 statusline 是 Claude Code 拉起的
+    # 非交互进程，Keychain 条目缺少 "Always Allow" 时（重新登录会新建条目、授权
+    # 重置）security 会以 errSecInteractionNotAllowed（退出码 36）静默失败
+    t=$(security find-generic-password -s "Claude Code-credentials" -w 2>/dev/null \
+      | jq -r '.claudeAiOauth.accessToken // empty' 2>/dev/null)
   fi
+  if [ -z "$t" ]; then
+    # Windows (Git Bash) / Linux 的常规位置；macOS 上 Keychain 读不到时也回退到这里
+    t=$(jq -r '.claudeAiOauth.accessToken // empty' \
+      "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/.credentials.json" 2>/dev/null)
+  fi
+  [ -n "$t" ] && echo "$t"
 }
 
 fetch_usage() {
@@ -73,9 +87,36 @@ cache_age=$(( now - $(mtime "$CACHE") ))
 backoff_age=$(( now - $(mtime "$BACKOFF") ))
 if [ "$cache_age" -gt "$TTL" ] && { [ ! -f "$BACKOFF" ] || [ "$backoff_age" -gt 600 ]; }; then
   fetch_usage
+  cache_age=$(( $(date +%s) - $(mtime "$CACHE") ))
 fi
 
-if [ -f "$CACHE" ]; then
+# 接口数据的健康标记，附在接口来的那一项后面：
+#   (429) 被限流、退避中，10 分钟后自动重试；(Nm) 数据是 N 分钟前的，
+#   说明至少连续两次刷新失败（token 读不到 / 接口变了 / 断网）
+stale=""
+if [ -f "$CACHE" ] && [ "$cache_age" -gt "$TTL" ]; then
+  if [ -f "$BACKOFF" ] && [ "$backoff_age" -le 600 ]; then
+    stale="(429)"
+  elif [ "$cache_age" -gt $(( TTL * 2 )) ]; then
+    stale="($(( cache_age / 60 ))m)"
+  fi
+fi
+
+usage="$stdin_usage"
+if [ -n "$stdin_usage" ]; then
+  if [ -f "$CACHE" ]; then
+    # stdin 已给 session/weekly，接口只补按模型的周配额
+    scoped=$(jq -r '
+      [ .limits[]? | select(.kind == "weekly_scoped")
+        | ((.scope.model.display_name // "scoped") | ascii_downcase)
+          + "_weekly:" + (.percent|tostring) + "%"
+      ] | join(" ")' "$CACHE" 2>/dev/null)
+    [ -n "$scoped" ] && usage="$usage $scoped$stale"
+  else
+    # 接口路径从没成功过 → 明确标出缺失，而不是悄悄少一项
+    usage="$usage $(echo "$model" | tr 'A-Z' 'a-z' | cut -d' ' -f1)_weekly:--"
+  fi
+elif [ -f "$CACHE" ]; then
   usage=$(jq -r '
     [ .limits[]?
       | if .kind == "session" then "session:" + (.percent|tostring) + "%"
@@ -85,6 +126,7 @@ if [ -f "$CACHE" ]; then
           + "_weekly:" + (.percent|tostring) + "%"
         else empty end
     ] | join(" ")' "$CACHE" 2>/dev/null)
+  [ -n "$usage" ] && usage="$usage$stale"
 fi
 
 # ---- 第一行：模型 + effort | 项目 | git 分支 ----

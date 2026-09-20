@@ -37,7 +37,8 @@
    - 若第 2 步配置了 IM 渠道，发一条测试通知让用户在手机上确认收到：
      `echo '{"hook_event_name":"Notification","notification_type":"permission_prompt","cwd":"'$PWD'"}' | bash hooks/notify.sh`
 4. 提醒用户：
-   - macOS 首次运行 statusline 会弹 Keychain 授权，选 "Always Allow"
+   - macOS 若弹出 Keychain 授权，选 "Always Allow"（新版 Claude Code 把配额直接放进
+     statusline 的 stdin，通常不会弹；不授权时脚本自动回退读 `~/.claude/.credentials.json`）
    - 重启 Claude Code 会话，用 `/hooks` 确认 hooks 已注册
 
 依赖：`bash` `curl` `git` `jq`。缺 `jq` 时 macOS 用 `brew install jq`，
