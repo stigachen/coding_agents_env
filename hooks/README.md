@@ -50,6 +50,7 @@
 | `NOTIFY_SHOW_HOST` | 1 | 消息前缀带主机名 `[项目@主机]` |
 | `NOTIFY_FROM_GROK` | 0 | 是否推送 Grok CLI 触发的事件（见下文） |
 | `NOTIFY_DEBUG` | 0 | 排障日志，写入 `~/.claude/notify-debug.log` |
+| `STATUSLINE_USAGE_API` | 0 | （状态栏用，由 `statusline.sh` 读取）设 1 后额外显示按模型的周配额，代价是用本机 OAuth token 调未公开的用量接口，详见 [statusline/README.md](../statusline/README.md) |
 
 `Stop` 每个回合都触发，包括你在旁边正常交互的短回合。嫌吵可设
 `NOTIFY_ON_STOP=0`，只保留"待审批 / 等输入"两类通知 ——

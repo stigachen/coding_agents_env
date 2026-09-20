@@ -37,7 +37,10 @@
    - 若第 2 步配置了 IM 渠道，发一条测试通知让用户在手机上确认收到：
      `echo '{"hook_event_name":"Notification","notification_type":"permission_prompt","cwd":"'$PWD'"}' | bash hooks/notify.sh`
 4. 提醒用户：
-   - macOS 首次运行 statusline 会弹 Keychain 授权，选 "Always Allow"
+   - 状态栏用量默认只显示 Claude Code 喂给 stdin 的 session/weekly；想看按模型的
+     周配额需把 `~/.claude/notify.env` 的 `STATUSLINE_USAGE_API` 设 1（用本机 OAuth
+     token 调未公开接口，默认关闭，不要替用户打开）。开启后 macOS 若弹 Keychain
+     授权选 "Always Allow"，不授权时脚本自动回退读 `~/.claude/.credentials.json`
    - 重启 Claude Code 会话，用 `/hooks` 确认 hooks 已注册
 
 依赖：`bash` `curl` `git` `jq`。缺 `jq` 时 macOS 用 `brew install jq`，
@@ -47,6 +50,8 @@ Windows Git Bash 把 `jq.exe` 放进 PATH。
 
 - `install.sh` — 一键部署入口（合并 settings.json，幂等）
 - `statusline/` — 两行状态栏：模型/effort/git 分支 + context 进度条 + 订阅配额
+  （session/weekly 取自 Claude Code 喂给 stdin 的 `rate_limits`；按模型周配额走
+  未公开接口，由 `notify.env` 的 `STATUSLINE_USAGE_API` 控制，默认关）
 - `hooks/` — `notify.sh`：Notification（待审批/等输入）和 Stop（回合结束）事件
   推送到 Telegram/Discord/macOS 桌面通知；终端窗口有键盘焦点时自动静音
   （`focus_check.ps1` 为 Windows 检测端）；渠道密钥和**所有通知开关**都在
@@ -60,7 +65,8 @@ Windows Git Bash 把 `jq.exe` 放进 PATH。
 - 所有 `*.sh` 必须 LF 结尾、兼容 bash 3.2（macOS 自带）与 Git Bash（Windows），
   多字节字符输出用 printf 八进制转义（原因见 statusline/README.md）
 - 密钥（IM token 等）一律放 `~/.claude/notify.env` 这类机器本地文件，绝不进仓库
-- 通知行为的开关一律加在 `notify.env`（由 `notify.sh` 运行时读取、带默认值），
+- 通知行为和状态栏的开关一律加在 `notify.env`（由 `notify.sh` / `statusline.sh`
+  运行时读取、带默认值），
   不要做进 settings.json 的 matcher——保证部署一次后调开关只改 notify.env、
   即时生效，不需要重装或重启
 - 新增定制模块时：脚本放独立子目录，部署逻辑加进 `install.sh` 并保持幂等，
