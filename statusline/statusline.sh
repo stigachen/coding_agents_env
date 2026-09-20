@@ -39,9 +39,19 @@ stdin_usage=$(echo "$input" | jq -r '
     (.rate_limits.seven_day.used_percentage // empty | "weekly:"  + (floor|tostring) + "%") ]
   | join(" ")' 2>/dev/null)
 
-# 路 2：用本机 OAuth token 查用量接口（5 分钟缓存 + 429 退避）。stdin 里没有
-# 按模型的周配额（fable_weekly 等），这一项只能从接口拿；stdin 完全没给
-# rate_limits 时（老版本 Claude Code / 会话首个响应之前）三项也都从这里取
+# 路 2（默认关闭，STATUSLINE_USAGE_API=1 开启）：用本机 OAuth token 查未公开的
+# 用量接口（5 分钟缓存 + 429 退避）。stdin 里没有按模型的周配额（fable_weekly
+# 等），这一项只能从接口拿；stdin 完全没给 rate_limits 时（老版本 Claude Code /
+# 会话首个响应之前）三项也都从这里取。关闭时不读凭据、不发任何请求。
+# 开关放 ~/.claude/notify.env（本机文件，改完即时生效）；只取这一个键，不
+# eval 整个文件，避免把 IM token 加载进 statusline 进程
+ENV_FILE="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/notify.env"
+STATUSLINE_USAGE_API=$(
+  [ -f "$ENV_FILE" ] && tr -d '\r' < "$ENV_FILE" \
+    | sed -n 's/^STATUSLINE_USAGE_API=["'"'"']*\([01]\).*/\1/p' | tail -1
+)
+STATUSLINE_USAGE_API="${STATUSLINE_USAGE_API:-0}"
+
 CACHE="${TMPDIR:-/tmp}/claude-statusline-usage.json"
 BACKOFF="${TMPDIR:-/tmp}/claude-statusline-usage.backoff"
 TTL=300
@@ -82,51 +92,53 @@ fetch_usage() {
   return 1
 }
 
-now=$(date +%s)
-cache_age=$(( now - $(mtime "$CACHE") ))
-backoff_age=$(( now - $(mtime "$BACKOFF") ))
-if [ "$cache_age" -gt "$TTL" ] && { [ ! -f "$BACKOFF" ] || [ "$backoff_age" -gt 600 ]; }; then
-  fetch_usage
-  cache_age=$(( $(date +%s) - $(mtime "$CACHE") ))
-fi
-
-# 接口数据的健康标记，附在接口来的那一项后面：
-#   (429) 被限流、退避中，10 分钟后自动重试；(Nm) 数据是 N 分钟前的，
-#   说明至少连续两次刷新失败（token 读不到 / 接口变了 / 断网）
-stale=""
-if [ -f "$CACHE" ] && [ "$cache_age" -gt "$TTL" ]; then
-  if [ -f "$BACKOFF" ] && [ "$backoff_age" -le 600 ]; then
-    stale="(429)"
-  elif [ "$cache_age" -gt $(( TTL * 2 )) ]; then
-    stale="($(( cache_age / 60 ))m)"
-  fi
-fi
-
 usage="$stdin_usage"
-if [ -n "$stdin_usage" ]; then
-  if [ -f "$CACHE" ]; then
-    # stdin 已给 session/weekly，接口只补按模型的周配额
-    scoped=$(jq -r '
-      [ .limits[]? | select(.kind == "weekly_scoped")
-        | ((.scope.model.display_name // "scoped") | ascii_downcase)
-          + "_weekly:" + (.percent|tostring) + "%"
-      ] | join(" ")' "$CACHE" 2>/dev/null)
-    [ -n "$scoped" ] && usage="$usage $scoped$stale"
-  else
-    # 接口路径从没成功过 → 明确标出缺失，而不是悄悄少一项
-    usage="$usage $(echo "$model" | tr 'A-Z' 'a-z' | cut -d' ' -f1)_weekly:--"
+if [ "$STATUSLINE_USAGE_API" = "1" ]; then
+  now=$(date +%s)
+  cache_age=$(( now - $(mtime "$CACHE") ))
+  backoff_age=$(( now - $(mtime "$BACKOFF") ))
+  if [ "$cache_age" -gt "$TTL" ] && { [ ! -f "$BACKOFF" ] || [ "$backoff_age" -gt 600 ]; }; then
+    fetch_usage
+    cache_age=$(( $(date +%s) - $(mtime "$CACHE") ))
   fi
-elif [ -f "$CACHE" ]; then
-  usage=$(jq -r '
-    [ .limits[]?
-      | if .kind == "session" then "session:" + (.percent|tostring) + "%"
-        elif .kind == "weekly_all" then "weekly:" + (.percent|tostring) + "%"
-        elif .kind == "weekly_scoped" then
-          ((.scope.model.display_name // "scoped") | ascii_downcase)
-          + "_weekly:" + (.percent|tostring) + "%"
-        else empty end
-    ] | join(" ")' "$CACHE" 2>/dev/null)
-  [ -n "$usage" ] && usage="$usage$stale"
+
+  # 接口数据的健康标记，附在接口来的那一项后面：
+  #   (429) 被限流、退避中，10 分钟后自动重试；(Nm) 数据是 N 分钟前的，
+  #   说明至少连续两次刷新失败（token 读不到 / 接口变了 / 断网）
+  stale=""
+  if [ -f "$CACHE" ] && [ "$cache_age" -gt "$TTL" ]; then
+    if [ -f "$BACKOFF" ] && [ "$backoff_age" -le 600 ]; then
+      stale="(429)"
+    elif [ "$cache_age" -gt $(( TTL * 2 )) ]; then
+      stale="($(( cache_age / 60 ))m)"
+    fi
+  fi
+
+  if [ -n "$stdin_usage" ]; then
+    if [ -f "$CACHE" ]; then
+      # stdin 已给 session/weekly，接口只补按模型的周配额
+      scoped=$(jq -r '
+        [ .limits[]? | select(.kind == "weekly_scoped")
+          | ((.scope.model.display_name // "scoped") | ascii_downcase)
+            + "_weekly:" + (.percent|tostring) + "%"
+        ] | join(" ")' "$CACHE" 2>/dev/null)
+      [ -n "$scoped" ] && usage="$usage $scoped$stale"
+    else
+      # 接口路径从没成功过 → 明确标出缺失，而不是悄悄少一项
+      usage="$usage $(echo "$model" | tr 'A-Z' 'a-z' | cut -d' ' -f1)_weekly:--"
+    fi
+  elif [ -f "$CACHE" ]; then
+    usage=$(jq -r '
+      [ .limits[]?
+        | if .kind == "session" then "session:" + (.percent|tostring) + "%"
+          elif .kind == "weekly_all" then "weekly:" + (.percent|tostring) + "%"
+          elif .kind == "weekly_scoped" then
+            ((.scope.model.display_name // "scoped") | ascii_downcase)
+            + "_weekly:" + (.percent|tostring) + "%"
+          else empty end
+      ] | join(" ")' "$CACHE" 2>/dev/null)
+    [ -n "$usage" ] && usage="$usage$stale"
+  fi
 fi
 
 # ---- 第一行：模型 + effort | 项目 | git 分支 ----

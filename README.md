@@ -46,7 +46,7 @@ bash install.sh
 两种方式都是幂等的。安装后：
 
 1. 编辑 `~/.claude/notify.env` 填入 Telegram bot token / Discord webhook（IM 通知才会生效）
-2. macOS 若弹出 Keychain 授权，选 **Always Allow**（新版 Claude Code 直接把配额喂给状态栏，通常不会弹；不授权也会自动回退读 `~/.claude/.credentials.json`）
+2. 状态栏的订阅用量默认只显示 Claude Code 自己喂给它的 session/weekly；想额外看按模型的周配额，把 `~/.claude/notify.env` 里的 `STATUSLINE_USAGE_API` 改成 1（会用本机 OAuth token 调未公开的用量接口）。开启后 macOS 若弹出 Keychain 授权，选 **Always Allow**；不授权也会自动回退读 `~/.claude/.credentials.json`
 3. 重启 Claude Code，用 `/hooks` 确认 hooks 已注册
 
 **依赖**：`bash` `curl` `git` `jq`（macOS: `brew install jq`；Windows Git Bash:
@@ -61,8 +61,9 @@ bash install.sh
 - **密钥不入库。** IM token 等放 `~/.claude/notify.env`（每台机器各自填写），
   仓库里只有 `notify.env.example` 模板。
 - **开关全在 notify.env。** 部署一次后，各类通知的启停（待审批 / 等输入 /
-  回合结束 / 前台静音 / 桌面弹窗）都只改 `~/.claude/notify.env`，即时生效，
-  不用碰 settings.json、不用重装。重跑 `install.sh` 会自动补齐模板新增的开关。
+  回合结束 / 前台静音 / 桌面弹窗）和状态栏的用量接口开关（`STATUSLINE_USAGE_API`）
+  都只改 `~/.claude/notify.env`，即时生效，不用碰 settings.json、不用重装。
+  重跑 `install.sh` 会自动补齐模板新增的开关。
 
 ## 更新
 
