@@ -43,12 +43,15 @@ stdin_usage=$(echo "$input" | jq -r '
 # 用量接口（5 分钟缓存 + 429 退避）。stdin 里没有按模型的周配额（fable_weekly
 # 等），这一项只能从接口拿；stdin 完全没给 rate_limits 时（老版本 Claude Code /
 # 会话首个响应之前）三项也都从这里取。关闭时不读凭据、不发任何请求。
-# 开关放 ~/.claude/notify.env（本机文件，改完即时生效）；只取这一个键，不
-# eval 整个文件，避免把 IM token 加载进 statusline 进程
-ENV_FILE="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/notify.env"
+# 开关放 ~/.config/coding_agents_env/notify.env（本机文件，各 agent 共用，
+# 改完即时生效；找不到时回退旧位置 ~/.claude/notify.env）。键名
+# CLAUDE_STATUSLINE_USAGE_API，兼容旧键名 STATUSLINE_USAGE_API。
+# 只取这一个键，不 eval 整个文件，避免把 IM token 加载进 statusline 进程
+ENV_FILE="${CODING_AGENTS_ENV_DIR:-$HOME/.config/coding_agents_env}/notify.env"
+[ -f "$ENV_FILE" ] || ENV_FILE="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/notify.env"
 STATUSLINE_USAGE_API=$(
   [ -f "$ENV_FILE" ] && tr -d '\r' < "$ENV_FILE" \
-    | sed -n 's/^STATUSLINE_USAGE_API=["'"'"']*\([01]\).*/\1/p' | tail -1
+    | sed -n 's/^\(CLAUDE_\)\{0,1\}STATUSLINE_USAGE_API=["'"'"']*\([01]\).*/\2/p' | tail -1
 )
 STATUSLINE_USAGE_API="${STATUSLINE_USAGE_API:-0}"
 
