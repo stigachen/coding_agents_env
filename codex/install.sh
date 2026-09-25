@@ -1,0 +1,166 @@
+#!/bin/bash
+# Codex CLI 部分的部署：
+#   1. ~/.codex/hooks.json：注册 Stop / PermissionRequest hooks → codex/hooks/notify.sh
+#   2. ~/.codex/config.toml：
+#      - [hooks.state."<hooks.json>:<event>:<i>:<j>"] trusted_hash：Codex 只执行
+#        "已信任" 的 hook（否则 TUI 启动时要求逐个审核，exec 模式直接跳过）。
+#        这里按 Codex 的算法预先算好并写入，免去手工审核
+#      - [features] hooks = true（缺失时补上；用户显式设 false 则尊重并提示）
+#      - [tui] 里插入 codex/tui.toml 的状态栏项（带 "# coding_agents_env" 标记）
+# 由根目录 install.sh 调用，也可单独执行。幂等：只增删本仓库自己的条目
+# （hooks.json 按 "/hooks/notify.sh" 路径特征识别；config.toml 按标记和自家
+# hash/key 识别），不碰其他工具写入的任何 hook / 配置键。
+
+set -euo pipefail
+
+REPO_DIR="${REPO_DIR:-$(cd "$(dirname "$0")/.." && pwd)}"
+CODEX_HOME="${CODEX_HOME:-$HOME/.codex}"
+HOOKS="$CODEX_HOME/hooks.json"
+CONFIG="$CODEX_HOME/config.toml"
+MARK="# coding_agents_env"
+NOTIFY_CMD="bash \"$REPO_DIR/codex/hooks/notify.sh\""
+TIMEOUT=30
+
+mkdir -p "$CODEX_HOME"
+[ -f "$HOOKS" ] || echo '{"hooks":{}}' > "$HOOKS"
+[ -f "$CONFIG" ] || : > "$CONFIG"
+
+# Codex 记 hook 信任状态用的路径是 hooks.json 的绝对路径（Windows 下是原生路径）
+HOOKS_KEY_PATH=$(cd "$CODEX_HOME" && pwd -P)/hooks.json
+case "$(uname)" in
+  MINGW*|MSYS*|CYGWIN*) HOOKS_KEY_PATH=$(cygpath -w "$HOOKS_KEY_PATH") ;;
+esac
+
+sha256() {
+  if command -v shasum >/dev/null 2>&1; then shasum -a 256 | cut -d' ' -f1
+  elif command -v sha256sum >/dev/null 2>&1; then sha256sum | cut -d' ' -f1
+  else openssl dgst -sha256 | sed 's/.*= *//'
+  fi
+}
+
+# ---- 1. hooks.json ----
+tmp=$(mktemp)
+jq --arg notify "$NOTIFY_CMD" --argjson t "$TIMEOUT" '
+  def strip_ours: map(select([.hooks[]?.command // ""] | any(contains("/hooks/notify.sh")) | not));
+  .hooks = (.hooks // {})
+  | .hooks.Stop = ((.hooks.Stop // []) | strip_ours)
+      + [{hooks: [{type: "command", command: $notify, timeout: $t}]}]
+  | .hooks.PermissionRequest = ((.hooks.PermissionRequest // []) | strip_ours)
+      + [{hooks: [{type: "command", command: $notify, timeout: $t}]}]
+' "$HOOKS" > "$tmp"
+mv "$tmp" "$HOOKS"
+
+# ---- 2. config.toml ----
+# 2a. 信任 hash：Codex 对 {event_name, matcher?, hooks:[归一化后的 handler]} 做
+#     canonical JSON（键排序、紧凑）再 sha256（codex-rs/hooks/src/engine/discovery.rs
+#     hook_hash + config/src/fingerprint.rs version_for_toml）。归一化会把 timeout
+#     补成实际值、async 补成 false。state key 为 <hooks.json 路径>:<event 小写>:<组序号>:<handler 序号>
+our_keys=""; our_hashes=""; state_blocks=""
+for pair in Stop:stop PermissionRequest:permission_request; do
+  ev=${pair%%:*}; label=${pair##*:}
+  gi=$(jq -r --arg ev "$ev" '.hooks[$ev] | to_entries[] | select([.value.hooks[]?.command // ""] | any(contains("/hooks/notify.sh"))) | .key' "$HOOKS" | head -1)
+  h=$(jq -n -S -c --arg l "$label" --arg c "$NOTIFY_CMD" --argjson t "$TIMEOUT" \
+        '{event_name: $l, hooks: [{type: "command", command: $c, timeout: $t, async: false}]}' \
+      | tr -d '\n' | sha256)
+  key="$HOOKS_KEY_PATH:$label:$gi:0"
+  our_keys="$our_keys
+$key"
+  our_hashes="$our_hashes
+sha256:$h"
+  state_blocks="$state_blocks
+[hooks.state.\"$key\"]
+trusted_hash = \"sha256:$h\"
+"
+done
+
+# 2b. 用 awk 重写 config.toml：
+#   - 删掉属于我们的 [hooks.state."…"] 块（key 指向我们的槽位，或 hash 是我们的）
+#   - 删掉带标记的旧行；[tui] 表里与 codex/tui.toml 同名的未标记键也删（我们接管该键）
+#   - [tui] 头后插入 codex/tui.toml 的行；[features] 里补 hooks = true
+tui_lines=$(grep -E '^[a-z_]+ *=' "$REPO_DIR/codex/tui.toml" | tr -d '\r' | sed "s/\$/  $MARK/")
+tui_keys=$(printf '%s\n' "$tui_lines" | sed 's/ *=.*//' | tr '\n' ' ')
+cp "$CONFIG" "$CONFIG.bak"
+# 多行值经 ENVIRON 传给 awk（BSD awk 的 -v 不接受含换行的字符串）
+export OUR_KEYS="$our_keys" OUR_HASHES="$our_hashes" TUI_LINES="$tui_lines"
+awk -v tui_keys="$tui_keys" -v mark="$MARK" '
+BEGIN {
+  tui_lines = ENVIRON["TUI_LINES"]
+  n = split(ENVIRON["OUR_KEYS"], a, "\n");   for (i = 1; i <= n; i++) if (a[i] != "") K[a[i]] = 1
+  n = split(ENVIRON["OUR_HASHES"], a, "\n"); for (i = 1; i <= n; i++) if (a[i] != "") H[a[i]] = 1
+  n = split(tui_keys, a, " ");                for (i = 1; i <= n; i++) if (a[i] != "") TK[a[i]] = 1
+  seen_tui = 0; seen_features = 0; features_has_hooks = 0
+}
+# 第一遍：找出要删的 hooks.state 块（按 key 或 hash）
+NR == FNR {
+  if ($0 ~ /^\[hooks\.state\."/) {
+    key = $0; sub(/^\[hooks\.state\."/, "", key); sub(/"\]$/, "", key); cur = key
+    if (key in K) DROP[key] = 1
+  } else if ($0 ~ /^\[/) cur = ""
+  else if (cur != "" && $0 ~ /^trusted_hash *=/) {
+    v = $0; sub(/^trusted_hash *= *"/, "", v); sub(/".*/, "", v)
+    if (v in H) DROP[cur] = 1
+  }
+  next
+}
+# 空行先攒着，遇到下一行实际内容再吐出：删块、追加块时不会越攒越多空行
+function out(l) { if (l == "") { pending++; return } ; while (pending > 0) { print ""; pending-- } ; print l }
+# 第二遍：输出
+{
+  line = $0
+  if (line ~ /^\[/) {
+    section = line
+    if (line ~ /^\[hooks\.state\."/) {
+      key = line; sub(/^\[hooks\.state\."/, "", key); sub(/"\]$/, "", key)
+      dropping = (key in DROP); if (dropping) next
+    } else dropping = 0
+    if (line ~ /^\[tui\]/)      { out(line); seen_tui = 1; out(tui_lines); next }
+    if (line ~ /^\[features\]/) { out(line); seen_features = 1; in_features = 1; next }
+    in_features = 0
+  }
+  if (dropping) next
+  if (index(line, mark) > 0) next
+  if (section ~ /^\[tui\]/ && line ~ /^[a-z_]+ *=/) {
+    k = line; sub(/ *=.*/, "", k)
+    if (k in TK) { printf("ℹ️  config.toml [tui] 原有的 %s 已被仓库版本接管\n", k) > "/dev/stderr"; next }
+  }
+  if (in_features && line ~ /^hooks *=/) {
+    features_has_hooks = 1
+    if (line ~ /false/) printf("⚠️  config.toml [features] hooks = false，Codex 不会执行任何 hook；需要通知请改成 true\n") > "/dev/stderr"
+  }
+  out(line)
+}
+END {
+  if (!seen_tui)      { print ""; print "[tui]"; print tui_lines }
+  if (!seen_features) { print ""; print "[features]"; print "hooks = true  " mark }
+  else if (!features_has_hooks) FEATURES_FIX = 1
+  if (FEATURES_FIX) exit 42
+}' "$CONFIG" "$CONFIG" > "$CONFIG.tmp" || {
+  rc=$?
+  if [ "$rc" = "42" ]; then
+    # [features] 存在但没有 hooks 键：在其表头后插一行
+    awk -v mark="$MARK" '{ print } /^\[features\]/ { print "hooks = true  " mark }' "$CONFIG.tmp" > "$CONFIG.tmp2"
+    mv "$CONFIG.tmp2" "$CONFIG.tmp"
+  else
+    rm -f "$CONFIG.tmp"; echo "改写 $CONFIG 失败" >&2; exit 1
+  fi
+}
+# 追加我们的信任块（放文件末尾；上面已删掉旧的同 key / 同 hash 块，不会重复定义）
+printf '%s' "$state_blocks" >> "$CONFIG.tmp"
+mv "$CONFIG.tmp" "$CONFIG"
+
+# 语法自检（有 python3 且 ≥3.11 时）
+if command -v python3 >/dev/null 2>&1; then
+  python3 - "$CONFIG" <<'PY' 2>/dev/null || { echo "⚠️  $CONFIG 不是合法 TOML，已回滚为 $CONFIG.bak" >&2; cp "$CONFIG.bak" "$CONFIG"; exit 1; }
+import sys
+try:
+    import tomllib
+except ImportError:
+    sys.exit(0)
+tomllib.load(open(sys.argv[1], "rb"))
+PY
+fi
+
+echo "✅ Codex"
+echo "   Stop/PermissionRequest hooks → $REPO_DIR/codex/hooks/notify.sh（已写入信任 hash）"
+echo "   [tui] status_line            → 来自 codex/tui.toml"
+echo "   hooks.json / config.toml     → ${CODEX_HOME}（config.toml 改动前备份为 config.toml.bak）"

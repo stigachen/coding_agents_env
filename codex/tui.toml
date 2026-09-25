@@ -1,0 +1,13 @@
+# Codex TUI 状态栏：写进 ~/.codex/config.toml 的 [tui] 表（由 codex/install.sh 插入，
+# 每行末尾带 "# coding_agents_env" 标记，重跑时按标记替换）。
+# Codex 不支持自定义命令画状态栏，只能从内置项目里选（TUI 里 /statusline 也能选，
+# 但会被本文件接管）。可选项（codex-rs/tui/src/bottom_pane/status_line_setup.rs）：
+#   model  model-with-reasoning  reasoning  fast-mode  current-dir  project-name  hostname
+#   git-branch  pull-request-number  branch-changes  run-state  permissions  approval-mode
+#   context-used  context-remaining  context-window-size  five-hour-limit  weekly-limit
+#   used-tokens  total-input-tokens  total-output-tokens  thread-name  thread-title  thread-id
+#   task-progress  raw-output  codex-version  app-name
+# 默认值是 ["model-with-reasoning", "current-dir", "thread-name"]
+# 和 Claude 状态栏对齐：模型+推理强度 | 目录 | 分支 | context | 5h/周配额
+status_line = ["model-with-reasoning", "current-dir", "git-branch", "context-used", "five-hour-limit", "weekly-limit"]
+status_line_use_colors = true
