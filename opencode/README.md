@@ -37,6 +37,16 @@ OpenCode 的 TUI 状态栏是内置的，只能换主题（`tui.json` 的 `theme
 `plugins/` 目录里其他插件一律不动。OpenCode 会自动加载该目录下所有 `.ts`，
 `tui.json` 的 `plugin_enabled` 可以按 id（`coding-agents-env`）关掉。
 
+## Windows（Git Bash）说明
+
+插件用 `spawn` 起 `send.sh`，Windows 上 PATH 里的 `bash` 往往是 WSL 的启动器，
+所以插件按顺序找：`CLAUDE_CODE_GIT_BASH_PATH` 环境变量、
+`C:\Program Files\Git\bin\bash.exe`、`usr\bin\bash.exe`、
+`%LOCALAPPDATA%\Programs\Git\bin\bash.exe`，都没有才退回 `bash`。传给
+Git Bash 的脚本路径用正斜杠。转发文件里的 import 路径由 `install.sh` 用
+`cygpath -m` 生成（`C:/Users/...`）。**未在 Windows 上实测**；排障时开
+`NOTIFY_DEBUG=1`，日志里 `bash=… send=…` 一行能看到实际用的路径。
+
 ## 手工测试
 
 插件跑在 OpenCode 的服务进程里，看不到它的 stdout；用调试日志：`NOTIFY_DEBUG=1`

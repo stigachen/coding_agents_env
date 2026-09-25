@@ -22,13 +22,30 @@
 //     v2 已激活时 v1 的处理函数直接返回，避免重复推送。
 
 import { spawn } from "node:child_process"
-import { appendFileSync, realpathSync } from "node:fs"
+import { appendFileSync, realpathSync, statSync } from "node:fs"
 import { homedir } from "node:os"
 import { basename, dirname, join } from "node:path"
 
 const HERE = dirname(realpathSync(import.meta.path))
-const SEND = join(HERE, "..", "lib", "send.sh")
 const AGENT = "OpenCode"
+const WIN = process.platform === "win32"
+// Git Bash 接受 C:/Users/... 形式的路径
+const SEND = WIN ? join(HERE, "..", "lib", "send.sh").replace(/\\/g, "/") : join(HERE, "..", "lib", "send.sh")
+
+// Windows 上 PATH 里的 bash 往往是 WSL 的启动器（System32\bash.exe），不是 Git Bash；
+// 优先用 Claude Code 的同名变量指定的路径，再找 Git 的默认安装位置
+function bashPath(): string {
+  if (!WIN) return "bash"
+  const candidates = [
+    process.env.CLAUDE_CODE_GIT_BASH_PATH,
+    join(process.env.ProgramFiles || "C:\\Program Files", "Git", "bin", "bash.exe"),
+    join(process.env.ProgramFiles || "C:\\Program Files", "Git", "usr", "bin", "bash.exe"),
+    join(process.env.LOCALAPPDATA || "", "Programs", "Git", "bin", "bash.exe"),
+  ]
+  for (const c of candidates) if (c) { try { if (statSync(c).isFile()) return c } catch {} }
+  return "bash"
+}
+const BASH = bashPath()
 
 let v2Active = false
 
@@ -49,7 +66,8 @@ function send(kind: string, directory: string | undefined, body: string): void {
   try {
     // detached + unref：宿主进程退出（比如 opencode run 结束即销毁的私有服务）时
     // 不连带杀掉正在推送的 send.sh
-    const child = spawn("bash", [SEND, kind, project, AGENT], {
+    dbg("bash=" + BASH + " send=" + SEND)
+    const child = spawn(BASH, [SEND, kind, project, AGENT], {
       stdio: ["pipe", "ignore", "ignore"],
       env: process.env,
       detached: true,
