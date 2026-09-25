@@ -15,8 +15,10 @@
 #
 # 配置文件：~/.config/coding_agents_env/notify.env（不入库，模板见同目录
 # notify.env.example）。找不到时回退旧位置 ~/.claude/notify.env。
-# 开关支持按 agent 覆盖：<AGENT>_NOTIFY_ON_STOP 之类（agent 名大写），
-# 没有该键时用通用的 NOTIFY_ON_STOP。
+# 所有开关和渠道键都支持按 agent 覆盖：<AGENT>_NOTIFY_ON_STOP、
+# <AGENT>_DISCORD_WEBHOOK_URL 之类（agent 名大写），没有该键时用通用键；
+# 前缀键留空表示对该 agent 明确关掉。TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID
+# 必须成对覆盖。
 #
 # NOTIFY_DRY_RUN=1：只打印判定结果和最终消息到 stdout，不推送，验证用。
 
@@ -43,12 +45,16 @@ fi
 
 # ---- 开关：先看 <AGENT>_KEY，再看 KEY，最后默认值 ----
 AGENT_UC=$(printf '%s' "$agent" | tr 'a-z' 'A-Z' | tr -c 'A-Z0-9\n' '_')
+# 判"是否设置"而不是"是否非空"：<AGENT>_KEY= 留空表示对该 agent 明确设为空
+# （比如 CODEX_DISCORD_WEBHOOK_URL= 让 Codex 不发共享的 Discord 频道），
+# 不会回退到通用键
+is_set() { [ -n "${!1+x}" ]; }
 setting() {  # setting KEY DEFAULT
-  local scoped="${AGENT_UC}_$1" v
-  v=${!scoped:-}
-  [ -n "$v" ] || v=${!1:-}
-  [ -n "$v" ] || v=$2
-  printf '%s' "$v"
+  local scoped="${AGENT_UC}_$1"
+  if is_set "$scoped"; then printf '%s' "${!scoped}"
+  elif is_set "$1"; then printf '%s' "${!1}"
+  else printf '%s' "$2"
+  fi
 }
 
 # xAI Grok CLI 会执行 Claude 的 hooks；默认忽略其事件（NOTIFY_FROM_GROK=0）
@@ -156,10 +162,31 @@ terminal_is_focused() {
   esac
 }
 
+# ---- 渠道：同样支持按 agent 覆盖（OPENCODE_DISCORD_WEBHOOK_URL 之类）----
+# 不同 agent 可以推到不同的群/频道，没有前缀键时回退通用键；前缀键留空 = 该
+# agent 不发这个渠道。Telegram 的 token 和 chat_id 成对解析：只要有一个前缀键
+# 存在就整对用前缀值，缺另一个则跳过 Telegram（否则会拿 A bot 去发 B 群，
+# Telegram 返回 400、通知静默丢失）
+tg_token=""; tg_chat=""
+if is_set "${AGENT_UC}_TELEGRAM_BOT_TOKEN" || is_set "${AGENT_UC}_TELEGRAM_CHAT_ID"; then
+  _t="${AGENT_UC}_TELEGRAM_BOT_TOKEN"; _c="${AGENT_UC}_TELEGRAM_CHAT_ID"
+  tg_token=${!_t:-}; tg_chat=${!_c:-}
+  if [ -z "$tg_token" ] || [ -z "$tg_chat" ]; then
+    dbg "telegram: ${AGENT_UC}_TELEGRAM_BOT_TOKEN / ${AGENT_UC}_TELEGRAM_CHAT_ID 需成对设置，跳过 Telegram"
+    tg_token=""; tg_chat=""
+  fi
+else
+  tg_token=${TELEGRAM_BOT_TOKEN:-}; tg_chat=${TELEGRAM_CHAT_ID:-}
+fi
+dc_url=$(setting DISCORD_WEBHOOK_URL "")
+tg_on=no; [ -n "$tg_token" ] && [ -n "$tg_chat" ] && tg_on=yes
+dc_on=no; [ -n "$dc_url" ] && dc_on=yes
+
 if [ "${NOTIFY_DRY_RUN:-0}" = "1" ]; then
   focused=no
   terminal_is_focused && focused=yes
-  printf '[dry-run] agent=%s kind=%s env=%s focused=%s\n%s\n' "$agent" "$kind" "$ENV_FILE" "$focused" "$msg"
+  printf '[dry-run] agent=%s kind=%s env=%s focused=%s telegram=%s discord=%s\n%s\n' \
+    "$agent" "$kind" "$ENV_FILE" "$focused" "$tg_on" "$dc_on" "$msg"
   exit 0
 fi
 
@@ -184,14 +211,8 @@ case "$(uname)" in
     [ -x /c/Windows/System32/curl.exe ] && CURL=/c/Windows/System32/curl.exe ;;
 esac
 
-# 渠道键同样支持按 agent 覆盖（OPENCODE_DISCORD_WEBHOOK_URL 之类）：
-# 不同 agent 可以推到不同的群/频道，没有前缀键时回退通用键
-tg_token=$(setting TELEGRAM_BOT_TOKEN "")
-tg_chat=$(setting TELEGRAM_CHAT_ID "")
-dc_url=$(setting DISCORD_WEBHOOK_URL "")
-
 # ---- Telegram ----
-if [ -n "$tg_token" ] && [ -n "$tg_chat" ]; then
+if [ "$tg_on" = "yes" ]; then
   tg_out=$(printf '%s' "$msg" | "$CURL" -sS -m 5 \
     "https://api.telegram.org/bot${tg_token}/sendMessage" \
     -d chat_id="${tg_chat}" --data-urlencode text@- 2>&1)
@@ -200,7 +221,7 @@ if [ -n "$tg_token" ] && [ -n "$tg_chat" ]; then
 fi
 
 # ---- Discord webhook ----
-if [ -n "$dc_url" ]; then
+if [ "$dc_on" = "yes" ]; then
   dc_out=$(printf '%s' "$msg" | jq -Rs '{content: .}' | "$CURL" -sS -m 5 \
     -H "Content-Type: application/json" --data-binary @- \
     "$dc_url" 2>&1)
