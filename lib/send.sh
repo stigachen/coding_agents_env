@@ -1,75 +1,94 @@
 #!/bin/bash
-# Claude Code hook：把"需要审批 / 等待输入 / 任务完成"事件推送到 IM。
-# 由 Notification 和 Stop 两个 hook 事件共用；stdin 是 Claude Code 传入的事件 JSON。
-# 渠道配置读取 ~/.claude/notify.env（不入库，每台机器各自填写，见 notify.env.example）。
+# 通知推送内核（各 coding agent 共用）。
+#
+# 用法：printf '%s' "<正文>" | bash send.sh <kind> <project> <agent>
+#   kind     permission | idle | stop | other
+#            permission：agent 在等审批    idle：agent 停下等输入
+#            stop：回合结束（正文 = 最后回复摘要，可为空）
+#            other：其他通知（正文 = 类型名或说明）
+#   project  项目名（一般是 cwd 的 basename）
+#   agent    调用方名字，显示在消息里：Claude / Codex / OpenCode / Grok …
+#            同时决定按 agent 覆盖的开关前缀（见下）
+#
+# 各 agent 目录下的适配层只负责把自家事件格式翻译成这三个参数加正文；
+# 开关判定、消息措辞、前台静音、各渠道推送全部在这里，保证三家行为一致。
+#
+# 配置文件：~/.config/coding_agents_env/notify.env（不入库，模板见同目录
+# notify.env.example）。找不到时回退旧位置 ~/.claude/notify.env。
+# 开关支持按 agent 覆盖：<AGENT>_NOTIFY_ON_STOP 之类（agent 名大写），
+# 没有该键时用通用的 NOTIFY_ON_STOP。
+#
+# NOTIFY_DRY_RUN=1：只打印判定结果和最终消息到 stdout，不推送，验证用。
 
-input=$(cat)
+kind=${1:-other}
+project=${2:-unknown}
+agent=${3:-Claude}
+body=$(cat)
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 CLAUDE_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
-ENV_FILE="$CLAUDE_DIR/notify.env"
+ENV_FILE="${CODING_AGENTS_ENV_DIR:-$HOME/.config/coding_agents_env}/notify.env"
+[ -f "$ENV_FILE" ] || ENV_FILE="$CLAUDE_DIR/notify.env"
+# 逐行加载 KEY=VALUE。环境变量 / 命令行前缀里已经设了的键优先于文件
+# （方便测试时临时覆盖：NOTIFY_SKIP_WHEN_FOCUSED=0 bash send.sh …）。
 # 去掉 \r 再加载：Windows 编辑器可能把文件存成 CRLF，直接 source 会让
 # 每个值尾部带 \r（token 失效，且 [ -n ] 判空检测不到）
-[ -f "$ENV_FILE" ] && eval "$(tr -d '\r' < "$ENV_FILE")"
-
-# ---- 调用方识别：Claude Code 还是 Grok CLI ----
-# xAI 的 Grok CLI 有 "Claude Code 兼容" 功能（compat.claude.hooks，默认开），
-# 会原样执行 ~/.claude/settings.json 里的 hooks，于是 Grok 的每个回合也会跑到
-# 这里。它每次调 hook 都注入 GROK_HOOK_EVENT 环境变量，据此识别。
-# 默认（NOTIFY_FROM_GROK=0）直接忽略 Grok 的事件；设 1 则照常推送，消息里
-# 标成 "Grok" 而非 "Claude"。Grok 的 stdin 载荷是 camelCase
-# （notificationType / lastAssistantMessage），下面读字段时两种写法都兼容
-agent="Claude"
-if [ -n "${GROK_HOOK_EVENT:-}" ]; then
-  [ "${NOTIFY_FROM_GROK:-0}" = "1" ] || exit 0
-  agent="Grok"
+if [ -f "$ENV_FILE" ]; then
+  while IFS= read -r line; do
+    case "$line" in [A-Z_]*=*) ;; *) continue ;; esac
+    printenv "${line%%=*}" >/dev/null 2>&1 && continue
+    eval "$line"
+  done < <(tr -d '\r' < "$ENV_FILE")
 fi
 
-event=$(echo "$input" | jq -r '.hook_event_name // empty')
-cwd=$(echo "$input" | jq -r '.cwd // empty')
-project=$(basename "${cwd:-unknown}")
+# ---- 开关：先看 <AGENT>_KEY，再看 KEY，最后默认值 ----
+AGENT_UC=$(printf '%s' "$agent" | tr 'a-z' 'A-Z' | tr -c 'A-Z0-9\n' '_')
+setting() {  # setting KEY DEFAULT
+  local scoped="${AGENT_UC}_$1" v
+  v=${!scoped:-}
+  [ -n "$v" ] || v=${!1:-}
+  [ -n "$v" ] || v=$2
+  printf '%s' "$v"
+}
 
-# 多台机器共用一个 IM 渠道时靠主机名区分来源：[项目@主机]。
-# hostname 在 macOS / Linux / Git Bash 下都有；去掉域名后缀只留短名。
-# NOTIFY_SHOW_HOST=0 恢复只显示项目名
+# xAI Grok CLI 会执行 Claude 的 hooks；默认忽略其事件（NOTIFY_FROM_GROK=0）
+if [ "$agent" = "Grok" ] && [ "$(setting NOTIFY_FROM_GROK 0)" != "1" ]; then
+  exit 0
+fi
+
+# 多台机器共用一个 IM 渠道时靠主机名区分来源：[项目@主机]
 tag="$project"
-if [ "${NOTIFY_SHOW_HOST:-1}" = "1" ]; then
+if [ "$(setting NOTIFY_SHOW_HOST 1)" = "1" ]; then
   host=$(hostname 2>/dev/null || echo "${HOSTNAME:-${COMPUTERNAME:-}}")
   host=${host%%.*}
   [ -n "$host" ] && tag="$project@$host"
 fi
 
-case "$event" in
-  Stop)
-    # Stop 每个回合都触发；置 NOTIFY_ON_STOP=0 可只保留待审批/等输入通知
-    [ "${NOTIFY_ON_STOP:-1}" = "0" ] && exit 0
-    # 摘要必须按字符（codepoint）截断，不能用 head -c：按字节截会把 UTF-8
-    # 多字节字符切成两半，Telegram 会以 400 "strings must be encoded in UTF-8"
-    # 拒收整条消息（中文消息约 2/3 概率踩中）。jq 的字符串切片按字符算
-    last=$(echo "$input" | jq -r '(.last_assistant_message // .lastAssistantMessage // "")[0:120]')
+case "$kind" in
+  permission)
+    [ "$(setting NOTIFY_ON_PERMISSION 1)" = "0" ] && exit 0
+    msg="🔔 [$tag] $agent 在等你批准一个操作" ;;
+  idle)
+    [ "$(setting NOTIFY_ON_IDLE 1)" = "0" ] && exit 0
+    msg="⏸️ [$tag] $agent 已停下，等待你的输入" ;;
+  stop)
+    [ "$(setting NOTIFY_ON_STOP 1)" = "0" ] && exit 0
+    # 摘要按字符（codepoint）截断，不能用 head -c：按字节截会把 UTF-8 多字节
+    # 字符切成两半，Telegram 会以 400 "strings must be encoded in UTF-8" 拒收
+    last=$(printf '%s' "$body" | jq -Rrs '.[0:120]' 2>/dev/null)
     msg="✅ [$tag] $agent 任务完成"
     [ -n "$last" ] && msg="$msg
-$last"
-    ;;
-  Notification)
-    # 类型级开关全在 notify.env（settings 的 matcher 放行所有类型），
-    # 部署一次后启停各类通知只需改 notify.env，即时生效
-    ntype=$(echo "$input" | jq -r '.notification_type // .notificationType // "notification"')
-    case "$ntype" in
-      permission_prompt)
-        [ "${NOTIFY_ON_PERMISSION:-1}" = "0" ] && exit 0
-        msg="🔔 [$tag] $agent 在等你批准一个操作" ;;
-      idle_prompt)
-        [ "${NOTIFY_ON_IDLE:-1}" = "0" ] && exit 0
-        msg="⏸️ [$tag] $agent 已停下，等待你的输入" ;;
-      *)
-        msg="🔔 [$tag] $agent 通知：$ntype" ;;
-    esac
-    ;;
+$last" ;;
   *)
-    exit 0
-    ;;
+    msg="🔔 [$tag] $agent 通知：${body:-$kind}" ;;
 esac
+
+# ---- 排障日志 ----
+dbg() {
+  [ "$(setting NOTIFY_DEBUG 0)" = "1" ] && \
+    printf '%s %s\n' "$(date '+%F %T')" "$*" >> "$CLAUDE_DIR/notify-debug.log"
+  return 0
+}
 
 # ---- 前台静音：终端窗口正被盯着时不推送 ----
 # 判定标准是"键盘焦点"而非"可见"：焦点窗口全系统只有一个，多显示器下
@@ -79,16 +98,10 @@ esac
 # 任何检测失败（SSH、tmux 断祖先链、无 GUI、缺工具）一律 fail-open 照常推送。
 # 已知限制：只能判断到窗口/应用级——同一终端 app 的其他窗口或 tab 聚焦时
 # 也会被静音（此时至少桌面就在眼前，代价可接受）。
-# NOTIFY_DEBUG=1 时把每次事件的判定现场写入 ~/.claude/notify-debug.log，排障用
-dbg() {
-  [ "${NOTIFY_DEBUG:-0}" = "1" ] && \
-    printf '%s %s\n' "$(date '+%F %T')" "$*" >> "$CLAUDE_DIR/notify-debug.log"
-  return 0
-}
-
 terminal_is_focused() {
-  [ "${NOTIFY_SKIP_WHEN_FOCUSED:-1}" = "1" ] || return 1
-  local max_idle="${NOTIFY_FOCUS_MAX_IDLE:-120}"
+  [ "$(setting NOTIFY_SKIP_WHEN_FOCUSED 1)" = "1" ] || return 1
+  local max_idle
+  max_idle=$(setting NOTIFY_FOCUS_MAX_IDLE 120)
   case "$(uname)" in
     Darwin)
       # 已锁屏 → 一定看不到终端，照常推送。单靠下面的空闲阈值不够：
@@ -143,12 +156,19 @@ terminal_is_focused() {
   esac
 }
 
-# 静音对所有渠道生效（IM + 桌面弹窗）；设 NOTIFY_SKIP_WHEN_FOCUSED=0 恢复全量推送
-if terminal_is_focused; then
-  dbg "event=$event → 静音跳过"
+if [ "${NOTIFY_DRY_RUN:-0}" = "1" ]; then
+  focused=no
+  terminal_is_focused && focused=yes
+  printf '[dry-run] agent=%s kind=%s env=%s focused=%s\n%s\n' "$agent" "$kind" "$ENV_FILE" "$focused" "$msg"
   exit 0
 fi
-dbg "event=$event agent=$agent tag=$tag → 推送: $(printf '%s' "$msg" | head -1)"
+
+# 静音对所有渠道生效（IM + 桌面弹窗）；设 NOTIFY_SKIP_WHEN_FOCUSED=0 恢复全量推送
+if terminal_is_focused; then
+  dbg "agent=$agent kind=$kind → 静音跳过"
+  exit 0
+fi
+dbg "agent=$agent kind=$kind tag=$tag → 推送: $(printf '%s' "$msg" | head -1)"
 
 # 消息文本一律经 stdin 传给 curl，不走命令行参数：Windows Git Bash 调用原生
 # curl.exe 时，MSYS→Win32 的 argv 编码转换会损坏非 ASCII 的 UTF-8 字节，
@@ -182,7 +202,7 @@ if [ -n "${DISCORD_WEBHOOK_URL:-}" ]; then
 fi
 
 # ---- 本机桌面通知（macOS，窗口在后台时的轻量提醒）----
-if [ "${DESKTOP_NOTIFY:-0}" = "1" ] && [ "$(uname)" = "Darwin" ]; then
+if [ "$(setting DESKTOP_NOTIFY 0)" = "1" ] && [ "$(uname)" = "Darwin" ]; then
   title=$(printf '%s' "$msg" | head -1 | sed 's/"/\\"/g')
   osascript -e "display notification \"\" with title \"$title\"" >/dev/null 2>&1
 fi

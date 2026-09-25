@@ -13,7 +13,7 @@ Line 1:
 
 Line 2:
 - **Context bar** — how full the current conversation's context window is, as a 10-segment bar colored green (< 60%) → yellow (60–79%) → red (≥ 80%), from the `context_window` data in the statusline stdin payload
-- **Subscription usage** — the same plan-level quota data you'd get from `/usage`: the 5-hour session window and 7-day window come straight from the `rate_limits` object Claude Code puts in the statusline stdin payload. Optionally (`STATUSLINE_USAGE_API=1` in `~/.claude/notify.env`, off by default) the per-model weekly limit (`fable_weekly:N%`) is added from Anthropic's OAuth usage endpoint, which is then also the fallback for everything on Claude Code versions without `rate_limits`
+- **Subscription usage** — the same plan-level quota data you'd get from `/usage`: the 5-hour session window and 7-day window come straight from the `rate_limits` object Claude Code puts in the statusline stdin payload. Optionally (`CLAUDE_STATUSLINE_USAGE_API=1` in `~/.config/coding_agents_env/notify.env`, off by default) the per-model weekly limit (`fable_weekly:N%`) is added from Anthropic's OAuth usage endpoint, which is then also the fallback for everything on Claude Code versions without `rate_limits`
 
 Works on **macOS**, **Windows (Git Bash)**, and **Linux** from the same script.
 
@@ -23,7 +23,7 @@ Works on **macOS**, **Windows (Git Bash)**, and **Linux** from the same script.
 
 Claude Code's statusline API pipes a JSON payload to your script after each interaction. Current versions include a `rate_limits` object there (5h / 7d `used_percentage`, Pro/Max only, present from the first API response of a session onward), so plan-level quota can be shown without any credentials or network access. Older versions only carry session-local data (model, directory, context, cost), and plan-level quota was only visible by manually running `/usage`.
 
-This script shows the quota without installing a plugin. It takes the 5h / 7d numbers from stdin `rate_limits` whenever present. With `STATUSLINE_USAGE_API=1` it additionally reads your existing Claude Code OAuth credentials locally to query the usage endpoint, which is the only source for the per-model weekly limit (stdin doesn't carry scoped limits) and the fallback for all three numbers when stdin has none. That endpoint is undocumented and the OAuth token is nominally for Claude Code's own use, so the API path is **off by default**: out of the box the script never reads credentials or makes network requests. Either way the numbers match `/usage`.
+This script shows the quota without installing a plugin. It takes the 5h / 7d numbers from stdin `rate_limits` whenever present. With `CLAUDE_STATUSLINE_USAGE_API=1` it additionally reads your existing Claude Code OAuth credentials locally to query the usage endpoint, which is the only source for the per-model weekly limit (stdin doesn't carry scoped limits) and the fallback for all three numbers when stdin has none. That endpoint is undocumented and the OAuth token is nominally for Claude Code's own use, so the API path is **off by default**: out of the box the script never reads credentials or makes network requests. Either way the numbers match `/usage`.
 
 ## How it works
 
@@ -35,7 +35,7 @@ Claude Code ──stdin JSON──▶ statusline.sh ──stdout (2 lines)──
                                  └─ usage (two sources, merged):
                                       ├─ stdin rate_limits → session:N% weekly:N%  (no token, no network)
                                       └─ OAuth usage API  → <model>_weekly:N%       (+ session/weekly when stdin has none)
-                                           only if STATUSLINE_USAGE_API=1 in ~/.claude/notify.env (default 0):
+                                           only if CLAUDE_STATUSLINE_USAGE_API=1 in ~/.config/coding_agents_env/notify.env (default 0):
                                            ├─ cache fresh (< 5 min)? → read cache
                                            └─ else → read OAuth token
                                                     (macOS: Keychain, then ~/.claude/.credentials.json;
@@ -48,9 +48,9 @@ Claude Code ──stdin JSON──▶ statusline.sh ──stdout (2 lines)──
 
 - **Event-driven, not polled.** Claude Code re-runs the script after each assistant reply (plus UI events like `/compact`), with debouncing. The script itself never runs in the background.
 - **Two sources, merged.** When the payload carries `rate_limits`, `session` and `weekly` are built from `rate_limits.five_hour.used_percentage` / `rate_limits.seven_day.used_percentage` (floored to integers) — these are always current and need no credentials. The API response is then used only for its `weekly_scoped` entries (`fable_weekly:N%`), because stdin doesn't carry per-model limits. When stdin has no `rate_limits` (older Claude Code, or before the session's first API response) all three come from the API. If the API path fails, you still get session/weekly from stdin; if stdin has nothing either, the usage segment is omitted.
-- **API path is opt-in.** `STATUSLINE_USAGE_API` in `~/.claude/notify.env` (the same per-machine file that holds the notification switches; `install.sh` adds the key with its default) gates the whole API path. Default `0`: no credential read, no request, no cache, no markers — the segment is just what stdin provides. Set `1` to get the per-model weekly line, or if your Claude Code is too old to provide `rate_limits` at all. The script reads only that one key from the file (no `eval`), so IM tokens never enter the statusline process. Changes take effect on the next refresh.
+- **API path is opt-in.** `CLAUDE_STATUSLINE_USAGE_API` in `~/.config/coding_agents_env/notify.env` (the per-machine file shared by all agents that also holds the notification switches; `install.sh` adds the key with its default and migrates the old `STATUSLINE_USAGE_API` key) gates the whole API path. Default `0`: no credential read, no request, no cache, no markers — the segment is just what stdin provides. Set `1` to get the per-model weekly line, or if your Claude Code is too old to provide `rate_limits` at all. The script reads only that one key from the file (no `eval`), so IM tokens never enter the statusline process. Changes take effect on the next refresh.
 - **5-minute cache + 429 backoff.** Statusline refreshes can be frequent; the usage API call is throttled to at most once per 5 minutes (`TTL=300`), and a 429 response pauses further calls for 10 minutes. Delete the cache file to force a refresh.
-- **API health is visible, not silent** (with `STATUSLINE_USAGE_API=1`). Because the per-model line comes from a cache that is only rewritten on a successful fetch, a broken API path would otherwise keep showing stale numbers forever. The script marks the API-sourced part instead:
+- **API health is visible, not silent** (with `CLAUDE_STATUSLINE_USAGE_API=1`). Because the per-model line comes from a cache that is only rewritten on a successful fetch, a broken API path would otherwise keep showing stale numbers forever. The script marks the API-sourced part instead:
   | shown | meaning |
   |---|---|
   | `fable_weekly:8%` | cache is ≤ 10 min old (one failed refresh is tolerated silently) |
@@ -77,7 +77,7 @@ Claude Code ──stdin JSON──▶ statusline.sh ──stdout (2 lines)──
 
 ### Credentials access
 
-Only relevant with `STATUSLINE_USAGE_API=1`: needed for the per-model weekly line (`fable_weekly:N%`), and for everything if your Claude Code version doesn't put `rate_limits` in the statusline payload. If that line shows up in a normal session, skip this.
+Only relevant with `CLAUDE_STATUSLINE_USAGE_API=1`: needed for the per-model weekly line (`fable_weekly:N%`), and for everything if your Claude Code version doesn't put `rate_limits` in the statusline payload. If that line shows up in a normal session, skip this.
 
 **macOS**
 
@@ -101,7 +101,7 @@ Both should print a token prefix (typically `sk-ant-oat…`).
 echo '{"model":{"display_name":"Fable 5"},"effort":{"level":"high"},"workspace":{"current_dir":"'$HOME'"},"context_window":{"used_percentage":42}}' | bash statusline.sh
 ```
 
-Expected output with `STATUSLINE_USAGE_API=1` (this payload has no `rate_limits`, so all three numbers come from the API; usage appears from the second run once the cache exists). With the default `0` this payload yields no usage segment at all, because there is nothing on stdin either:
+Expected output with `CLAUDE_STATUSLINE_USAGE_API=1` (this payload has no `rate_limits`, so all three numbers come from the API; usage appears from the second run once the cache exists). With the default `0` this payload yields no usage segment at all, because there is nothing on stdin either:
 
 ```
 Fable 5 (effort:high) | yourname
@@ -112,13 +112,13 @@ To see the merged behaviour, add a `rate_limits` object to the payload — sessi
 
 ```bash
 echo '{"model":{"display_name":"Fable 5"},"workspace":{"current_dir":"'$HOME'"},"context_window":{"used_percentage":42},"rate_limits":{"five_hour":{"used_percentage":23.5},"seven_day":{"used_percentage":41.2}}}' | bash statusline.sh
-# STATUSLINE_USAGE_API=1 → ctx ████░░░░░░ 42% | session:23% weekly:41% fable_weekly:15%
-# STATUSLINE_USAGE_API=0 → ctx ████░░░░░░ 42% | session:23% weekly:41%
+# CLAUDE_STATUSLINE_USAGE_API=1 → ctx ████░░░░░░ 42% | session:23% weekly:41% fable_weekly:15%
+# CLAUDE_STATUSLINE_USAGE_API=0 → ctx ████░░░░░░ 42% | session:23% weekly:41%
 ```
 
 ### Troubleshooting `--` / `(Nm)` / `(429)`
 
-These markers only exist with `STATUSLINE_USAGE_API=1`. If you see no usage segment at all with the default `0`, your Claude Code isn't providing `rate_limits` yet (older version, or the session hasn't had its first API response) — either wait a turn or enable the API path.
+These markers only exist with `CLAUDE_STATUSLINE_USAGE_API=1`. If you see no usage segment at all with the default `0`, your Claude Code isn't providing `rate_limits` yet (older version, or the session hasn't had its first API response) — either wait a turn or enable the API path.
 
 - `(429)` — nothing to do; the script backs off for 10 minutes and retries by itself.
 - `--` or `(Nm)` — the API path can't complete. Run the smoke test above from a terminal: if it prints `fable_weekly:N%` and creates `$TMPDIR/claude-statusline-usage.json`, credentials work from an interactive shell but not from Claude Code's non-interactive statusline process — on macOS that means the Keychain item needs an "Always Allow" grant, or `~/.claude/.credentials.json` is missing/expired (see *Credentials access*). If the smoke test itself fails, check network access to `api.anthropic.com` and whether the endpoint's response shape changed (`jq . "$TMPDIR/claude-statusline-usage.json"`).
