@@ -29,8 +29,9 @@
      hook）、`[features] hooks = true`、`[tui]` 状态栏项（改写前备份为
      `config.toml.bak`）
 2. **交互式收集通知渠道配置**。检查 `~/.config/coding_agents_env/notify.env`：
-   若关键项均为空（TELEGRAM_BOT_TOKEN / DISCORD_WEBHOOK_URL 都没填），在对话中
-   询问用户：
+   若没有任何渠道键填了值，在对话中询问用户。判断命令（有输出即视为已配置，
+   通用键和 `CLAUDE_` / `CODEX_` / `OPENCODE_` 前缀键都算）：
+   `grep -E '^([A-Z]+_)?(TELEGRAM_BOT_TOKEN|DISCORD_WEBHOOK_URL)=.+' ~/.config/coding_agents_env/notify.env`
    - 用哪个通知渠道？（Telegram / Discord / 两者 / 暂不配置）
    - 对应的凭据：Telegram 要 bot token + chat_id（用户没有的话，指引：找
      @BotFather 建 bot；给 bot 发条消息后访问

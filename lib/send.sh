@@ -33,11 +33,22 @@ ENV_FILE="${CODING_AGENTS_ENV_DIR:-$HOME/.config/coding_agents_env}/notify.env"
 # （方便测试时临时覆盖：NOTIFY_SKIP_WHEN_FOCUSED=0 bash send.sh …）。
 # 去掉 \r 再加载：Windows 编辑器可能把文件存成 CRLF，直接 source 会让
 # 每个值尾部带 \r（token 失效，且 [ -n ] 判空检测不到）
+# 不用 eval：值一律按字面量赋给变量，& ; $ ` 等字符不会被 shell 解释
+# （Discord webhook 带 ?wait=true&thread_id=… 这类查询串时 eval 会把 & 当后台
+# 命令切断，键变空、通知静默丢失）。兼容 KEY="v" / KEY='v' 写法（去掉成对引号）
+# 和 KEY=v  # 注释 写法（未加引号时截掉 " #" 之后的部分）
 if [ -f "$ENV_FILE" ]; then
   while IFS= read -r line; do
     case "$line" in [A-Z_]*=*) ;; *) continue ;; esac
-    printenv "${line%%=*}" >/dev/null 2>&1 && continue
-    eval "$line"
+    key=${line%%=*}; val=${line#*=}
+    case "$key" in *[!A-Z0-9_]*) continue ;; esac
+    printenv "$key" >/dev/null 2>&1 && continue
+    case "$val" in
+      \"*\") val=${val#\"}; val=${val%\"} ;;
+      \'*\') val=${val#\'}; val=${val%\'} ;;
+      *)  val=${val%%\ \#*}; val=${val%"${val##*[! 	]}"} ;;
+    esac
+    printf -v "$key" '%s' "$val"
   done < <(tr -d '\r' < "$ENV_FILE")
 fi
 
