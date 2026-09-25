@@ -7,3 +7,6 @@
 *.example text eol=lf
 # PowerShell 对 LF 兼容，统一钉 LF 保持仓库一致
 *.ps1 text eol=lf
+# OpenCode 插件和 Codex 配置片段同样钉 LF（Bun / install.sh 都能处理 CRLF，只是保持一致）
+*.ts text eol=lf
+*.toml text eol=lf

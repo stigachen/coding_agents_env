@@ -53,8 +53,12 @@ TUI 里 `/statusline` 也是改这个键）。`tui.toml` 里是要写进 `[tui]`
    块（key 指向我们的槽位，或 hash 是我们的）和带标记的行，插入 `[tui]` 行和
    `[features] hooks`，末尾追加新的信任块。有 python3 ≥ 3.11 时用 `tomllib`
    校验结果，非法则回滚
-3. Windows（Git Bash）：信任 key 里的路径用 `cygpath -w` 转成原生路径。未在
-   Windows 上实测
+3. Windows（Git Bash）：信任 key 里的路径用 `cygpath -w` 转成原生路径，键名改用
+   TOML 的 `'…'` 字面字符串（`"…"` 里反斜杠是转义符）；解析 config.toml 时容忍
+   CRLF。**未在 Windows 上实测**：Codex 在 Windows 上生成 key 用的路径写法
+   （反斜杠、是否带 `\\?\` 前缀）没有验证。若 key 对不上，Codex 只会把这两个
+   hook 标成未信任，在 TUI 里 `/hooks` 手动信任一次即可，Codex 会自己写入正确的
+   state 块，之后重跑 `install.sh` 也不会覆盖它
 
 ## 手工测试
 

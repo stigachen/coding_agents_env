@@ -63,12 +63,15 @@ for pair in Stop:stop PermissionRequest:permission_request; do
         '{event_name: $l, hooks: [{type: "command", command: $c, timeout: $t, async: false}]}' \
       | tr -d '\n' | sha256)
   key="$HOOKS_KEY_PATH:$label:$gi:0"
+  # TOML 的 "…" 基本字符串里 \ 是转义符，Windows 路径（C:\Users\…）会解析失败；
+  # 含反斜杠时改用 '…' 字面字符串作键名（Codex 读到的键值相同）
+  case "$key" in *\\*) qkey="'$key'" ;; *) qkey="\"$key\"" ;; esac
   our_keys="$our_keys
 $key"
   our_hashes="$our_hashes
 sha256:$h"
   state_blocks="$state_blocks
-[hooks.state.\"$key\"]
+[hooks.state.$qkey]
 trusted_hash = \"sha256:$h\"
 "
 done
@@ -90,14 +93,20 @@ BEGIN {
   n = split(tui_keys, a, " ");                for (i = 1; i <= n; i++) if (a[i] != "") TK[a[i]] = 1
   seen_tui = 0; seen_features = 0; features_has_hooks = 0
 }
-# 第一遍：找出要删的 hooks.state 块（按 key 或 hash）
+# 取 [hooks.state."…"] / [hooks.state.'"'"'…'"'"'] 头里的键名（两种引号都认）
+function state_key(l,   k) {
+  k = l; sub(/^\[hooks\.state\.["'"'"']/, "", k); sub(/["'"'"']\][ \t]*$/, "", k); return k
+}
+# 第一遍：找出要删的 hooks.state 块（按 key 或 hash）。匹配前去掉行尾 \r，
+# Windows 上 config.toml 可能是 CRLF；输出仍写原行，不改用户文件的换行风格
 NR == FNR {
-  if ($0 ~ /^\[hooks\.state\."/) {
-    key = $0; sub(/^\[hooks\.state\."/, "", key); sub(/"\]$/, "", key); cur = key
-    if (key in K) DROP[key] = 1
-  } else if ($0 ~ /^\[/) cur = ""
-  else if (cur != "" && $0 ~ /^trusted_hash *=/) {
-    v = $0; sub(/^trusted_hash *= *"/, "", v); sub(/".*/, "", v)
+  l = $0; sub(/\r$/, "", l)
+  if (l ~ /^\[hooks\.state\.["'"'"']/) {
+    cur = state_key(l)
+    if (cur in K) DROP[cur] = 1
+  } else if (l ~ /^\[/) cur = ""
+  else if (cur != "" && l ~ /^trusted_hash *=/) {
+    v = l; sub(/^trusted_hash *= *"/, "", v); sub(/".*/, "", v)
     if (v in H) DROP[cur] = 1
   }
   next
@@ -106,26 +115,25 @@ NR == FNR {
 function out(l) { if (l == "") { pending++; return } ; while (pending > 0) { print ""; pending-- } ; print l }
 # 第二遍：输出
 {
-  line = $0
-  if (line ~ /^\[/) {
-    section = line
-    if (line ~ /^\[hooks\.state\."/) {
-      key = line; sub(/^\[hooks\.state\."/, "", key); sub(/"\]$/, "", key)
-      dropping = (key in DROP); if (dropping) next
+  line = $0; l = line; sub(/\r$/, "", l)
+  if (l ~ /^\[/) {
+    section = l
+    if (l ~ /^\[hooks\.state\.["'"'"']/) {
+      dropping = (state_key(l) in DROP); if (dropping) next
     } else dropping = 0
-    if (line ~ /^\[tui\]/)      { out(line); seen_tui = 1; out(tui_lines); next }
-    if (line ~ /^\[features\]/) { out(line); seen_features = 1; in_features = 1; next }
+    if (l ~ /^\[tui\]/)      { out(line); seen_tui = 1; out(tui_lines); next }
+    if (l ~ /^\[features\]/) { out(line); seen_features = 1; in_features = 1; next }
     in_features = 0
   }
   if (dropping) next
   if (index(line, mark) > 0) next
-  if (section ~ /^\[tui\]/ && line ~ /^[a-z_]+ *=/) {
-    k = line; sub(/ *=.*/, "", k)
+  if (section ~ /^\[tui\]/ && l ~ /^[a-z_]+ *=/) {
+    k = l; sub(/ *=.*/, "", k)
     if (k in TK) { printf("ℹ️  config.toml [tui] 原有的 %s 已被仓库版本接管\n", k) > "/dev/stderr"; next }
   }
-  if (in_features && line ~ /^hooks *=/) {
+  if (in_features && l ~ /^hooks *=/) {
     features_has_hooks = 1
-    if (line ~ /false/) printf("⚠️  config.toml [features] hooks = false，Codex 不会执行任何 hook；需要通知请改成 true\n") > "/dev/stderr"
+    if (l ~ /false/) printf("⚠️  config.toml [features] hooks = false，Codex 不会执行任何 hook；需要通知请改成 true\n") > "/dev/stderr"
   }
   out(line)
 }
