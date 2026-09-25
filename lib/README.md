@@ -37,6 +37,9 @@
   `https://api.telegram.org/bot<TOKEN>/getUpdates` 查 chat_id。
 - **Discord**：`DISCORD_WEBHOOK_URL`。服务器设置 → 整合 → Webhook → 复制 URL，
   无需注册 bot。
+- 以上渠道键都可以加 agent 前缀（`OPENCODE_DISCORD_WEBHOOK_URL=…`）让某个
+  agent 推到别的群/频道，留空（`CODEX_DISCORD_WEBHOOK_URL=`）则该 agent 不发这个
+  渠道。Telegram 的两个键要成对覆盖。详见下文"按 agent 覆盖"。
 - **macOS 桌面通知**：`DESKTOP_NOTIFY=1`。人在电脑前但窗口在后台时的轻量提醒
   （`osascript`，无外网依赖）。
 
@@ -63,10 +66,15 @@ hook 配置里不设 matcher 过滤，事件先到 `send.sh` 再按开关决定�
 `NOTIFY_SKIP_WHEN_FOCUSED=0 NOTIFY_DEBUG=1 bash lib/send.sh …` 临时改行为，
 不用动文件。
 
-**按 agent 覆盖**：任何 `NOTIFY_*` 开关和 `DESKTOP_NOTIFY` 都可以加前缀只对
-某个 agent 生效，前缀是 agent 名大写：`CODEX_NOTIFY_ON_STOP=0` 只关掉 Codex 的
-回合结束通知，`OPENCODE_DESKTOP_NOTIFY=1` 只给 OpenCode 开桌面弹窗。查找顺序：
-`<AGENT>_KEY` → `KEY` → 默认值。
+**按 agent 覆盖**：任何 `NOTIFY_*` 开关、`DESKTOP_NOTIFY` 以及渠道键
+（`TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` / `DISCORD_WEBHOOK_URL`）都可以加
+前缀只对某个 agent 生效，前缀是 agent 名大写：`CODEX_NOTIFY_ON_STOP=0` 只关掉
+Codex 的回合结束通知，`OPENCODE_DESKTOP_NOTIFY=1` 只给 OpenCode 开桌面弹窗，
+`OPENCODE_DISCORD_WEBHOOK_URL=…` 让 OpenCode 推到另一个 Discord 频道。查找顺序：
+`<AGENT>_KEY` → `KEY` → 默认值，判的是"是否设置"而非"是否非空"：前缀键留空
+（`CODEX_DISCORD_WEBHOOK_URL=`）表示对该 agent 明确关掉，不回退通用键。
+`TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` 成对解析，只覆盖其中一个会跳过
+Telegram（`NOTIFY_DEBUG=1` 时日志里有提示）。
 
 `stop` 每个回合都触发，包括你在旁边正常交互的短回合。嫌吵可设
 `NOTIFY_ON_STOP=0`，只保留"待审批 / 等输入"两类通知 ——
