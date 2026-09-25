@@ -22,6 +22,10 @@
    - Claude Code：在 `~/.claude/settings.json` 写入 statusLine 配置和
      Notification/Stop hooks，命令指向本仓库内脚本的绝对路径（git pull 即生效，
      不拷贝文件）。旧版仓库布局写入的条目会被识别并替换
+   - Codex：在 `~/.codex/hooks.json` 注册 Stop/PermissionRequest hooks；在
+     `~/.codex/config.toml` 写入这两个 hook 的信任 hash（Codex 只执行已信任的
+     hook）、`[features] hooks = true`、`[tui]` 状态栏项（改写前备份为
+     `config.toml.bak`）
 2. **交互式收集通知渠道配置**。检查 `~/.config/coding_agents_env/notify.env`：
    若关键项均为空（TELEGRAM_BOT_TOKEN / DISCORD_WEBHOOK_URL 都没填），在对话中
    询问用户：
@@ -51,6 +55,11 @@
      `echo '{"hook_event_name":"Notification","notification_type":"permission_prompt","cwd":"'$PWD'"}' | bash claude/hooks/notify.sh`
      注意前台静音：终端窗口聚焦时不会真发，可临时 `NOTIFY_SKIP_WHEN_FOCUSED=0`
      加在命令前
+   - 装了 Codex 的机器：`jq . ~/.codex/hooks.json` 合法且含本仓库的
+     Stop/PermissionRequest 条目；`grep -c coding_agents_env ~/.codex/config.toml`
+     ≥ 2（状态栏两行）；`grep -A1 'hooks.json:stop' ~/.codex/config.toml` 能看到
+     trusted_hash。可跑一轮 `codex exec "Reply with exactly the single word: pong"`
+     端到端验证（会真发一条 Codex 任务完成通知）
 4. 提醒用户：
    - 状态栏用量默认只显示 Claude Code 喂给 stdin 的 session/weekly；想看按模型的
      周配额需把 `notify.env` 的 `CLAUDE_STATUSLINE_USAGE_API` 设 1（用本机 OAuth
@@ -88,7 +97,11 @@ jq 检查没有旧路径残留，以及 `~/.config/coding_agents_env/notify.env`
     翻译成 `send.sh` 的参数。xAI Grok CLI 会执行 Claude 的 hooks，其事件默认被
     忽略（`NOTIFY_FROM_GROK`）
   - `install.sh` 合并 `~/.claude/settings.json`
-- `codex/` — Codex CLI（hooks.json 通知适配 + `[tui] status_line` 配置片段）
+- `codex/` — Codex CLI：
+  - `hooks/notify.sh` Stop / PermissionRequest 事件的适配层（Codex 没有 idle 事件）
+  - `tui.toml` 写进 `[tui]` 表的状态栏行（Codex 只支持内置项目，不支持自定义命令）
+  - `install.sh` 合并 hooks.json、按 Codex 算法写入 hook 信任 hash、插入 `[tui]` 行。
+    细节见 codex/README.md
 - `opencode/` — OpenCode（通知插件）
 
 ## 约定

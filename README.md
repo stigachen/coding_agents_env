@@ -20,7 +20,7 @@ ctx ██████░░░░ 67% | session:3% weekly:9%
 |---|---|---|
 | `lib/` | 三家共用的通知内核：待审批 / 等待输入 / 任务完成时推送 Telegram / Discord / macOS 桌面通知；终端窗口聚焦时自动静音；所有开关在一个本机文件里，支持按 agent 覆盖 | [lib/README.md](lib/README.md) |
 | `claude/` | Claude Code：两行状态栏（模型/effort/git 分支 + context 进度条 + 订阅配额）、Notification/Stop hooks 适配层、settings.json 合并 | [statusline](claude/statusline/README.md) · [hooks](claude/hooks/README.md) |
-| `codex/` | Codex CLI：hooks.json 通知适配、`[tui] status_line` 配置片段 | — |
+| `codex/` | Codex CLI：hooks.json 通知适配（含 hook 信任 hash 的自动写入）、`[tui] status_line` 配置片段 | [codex/README.md](codex/README.md) |
 | `opencode/` | OpenCode：通知插件 | — |
 | `install.sh` | 一键部署：共用配置生成/迁移，再按本机装了哪些 agent 分发到各目录，幂等可重复执行 | — |
 | `AGENTS.md` | 让 agent 自己会装：描述部署流程与仓库约定（三家都读；`CLAUDE.md` 仅一行 `@AGENTS.md`） | — |
