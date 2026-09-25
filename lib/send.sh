@@ -184,20 +184,26 @@ case "$(uname)" in
     [ -x /c/Windows/System32/curl.exe ] && CURL=/c/Windows/System32/curl.exe ;;
 esac
 
+# 渠道键同样支持按 agent 覆盖（OPENCODE_DISCORD_WEBHOOK_URL 之类）：
+# 不同 agent 可以推到不同的群/频道，没有前缀键时回退通用键
+tg_token=$(setting TELEGRAM_BOT_TOKEN "")
+tg_chat=$(setting TELEGRAM_CHAT_ID "")
+dc_url=$(setting DISCORD_WEBHOOK_URL "")
+
 # ---- Telegram ----
-if [ -n "${TELEGRAM_BOT_TOKEN:-}" ] && [ -n "${TELEGRAM_CHAT_ID:-}" ]; then
+if [ -n "$tg_token" ] && [ -n "$tg_chat" ]; then
   tg_out=$(printf '%s' "$msg" | "$CURL" -sS -m 5 \
-    "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
-    -d chat_id="${TELEGRAM_CHAT_ID}" --data-urlencode text@- 2>&1)
+    "https://api.telegram.org/bot${tg_token}/sendMessage" \
+    -d chat_id="${tg_chat}" --data-urlencode text@- 2>&1)
   tg_rc=$?
   dbg "telegram($CURL) rc=$tg_rc resp=${tg_out:0:120}"
 fi
 
 # ---- Discord webhook ----
-if [ -n "${DISCORD_WEBHOOK_URL:-}" ]; then
+if [ -n "$dc_url" ]; then
   dc_out=$(printf '%s' "$msg" | jq -Rs '{content: .}' | "$CURL" -sS -m 5 \
     -H "Content-Type: application/json" --data-binary @- \
-    "$DISCORD_WEBHOOK_URL" 2>&1)
+    "$dc_url" 2>&1)
   dbg "discord($CURL) rc=$? resp=${dc_out:0:120}"
 fi
 
