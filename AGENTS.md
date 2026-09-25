@@ -22,6 +22,8 @@
    - Claude Code：在 `~/.claude/settings.json` 写入 statusLine 配置和
      Notification/Stop hooks，命令指向本仓库内脚本的绝对路径（git pull 即生效，
      不拷贝文件）。旧版仓库布局写入的条目会被识别并替换
+   - OpenCode：在 `~/.config/opencode/plugins/` 生成转发文件 `coding_agents_env.ts`
+     （一行 export 指向仓库里的 `opencode/notify.ts`），其他插件不动
    - Codex：在 `~/.codex/hooks.json` 注册 Stop/PermissionRequest hooks；在
      `~/.codex/config.toml` 写入这两个 hook 的信任 hash（Codex 只执行已信任的
      hook）、`[features] hooks = true`、`[tui]` 状态栏项（改写前备份为
@@ -60,6 +62,10 @@
      ≥ 2（状态栏两行）；`grep -A1 'hooks.json:stop' ~/.codex/config.toml` 能看到
      trusted_hash。可跑一轮 `codex exec "Reply with exactly the single word: pong"`
      端到端验证（会真发一条 Codex 任务完成通知）
+   - 装了 OpenCode 的机器：`~/.config/opencode/plugins/coding_agents_env.ts` 存在且
+     指向仓库路径。端到端：`NOTIFY_DEBUG=1 opencode run --standalone "Reply with
+     exactly the single word: pong"` 后 `~/.claude/notify-debug.log` 应有
+     `agent=OpenCode kind=stop` 一行
 4. 提醒用户：
    - 状态栏用量默认只显示 Claude Code 喂给 stdin 的 session/weekly；想看按模型的
      周配额需把 `notify.env` 的 `CLAUDE_STATUSLINE_USAGE_API` 设 1（用本机 OAuth
@@ -102,7 +108,10 @@ jq 检查没有旧路径残留，以及 `~/.config/coding_agents_env/notify.env`
   - `tui.toml` 写进 `[tui]` 表的状态栏行（Codex 只支持内置项目，不支持自定义命令）
   - `install.sh` 合并 hooks.json、按 Codex 算法写入 hook 信任 hash、插入 `[tui]` 行。
     细节见 codex/README.md
-- `opencode/` — OpenCode（通知插件）
+- `opencode/` — OpenCode：
+  - `notify.ts` 通知插件（v1/v2 两代插件 API 都支持；回合结束 / 等审批 / 执行失败）
+  - `install.sh` 在 OpenCode 插件目录生成一行转发文件指向仓库。OpenCode 没有可
+    配置的状态栏。细节见 opencode/README.md
 
 ## 约定
 
