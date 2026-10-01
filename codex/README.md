@@ -11,10 +11,34 @@ Codex 读 `~/.codex/hooks.json`，格式和事件名与 Claude Code 的 hooks �
 | Codex 事件 | `send.sh` kind | 说明 |
 |---|---|---|
 | `Stop`（回合结束，附最后回复摘要） | `stop` | |
-| `PermissionRequest`（弹出审批提示之前） | `permission` | 决策型 hook；本脚本不输出决策直接退出 0，Codex 照常弹审批 |
+| `PermissionRequest`（进入审批流程之前） | `permission` | 已确认自动审核的 shell / 文件修改请求不通知；其他请求照常通知。本脚本不输出审批决策 |
 
 Codex 没有 Claude 那种"停下 60 秒没人理"的 idle 事件，所以这里没有 `idle`。
 hook 退出非 0 或超时只会在 Codex 的 hook 列表里标一条 Failed，不影响 Codex 运行。
+
+### “帮我批准”模式下的审批通知
+
+`PermissionRequest` 不代表已经弹出人工审批框：自动审核或其他 hook 可以接手
+请求。因此仅凭这个事件就推送“在等你批准”会产生误报。
+
+适配层利用 hook 的 `transcript_path` 和 `turn_id`，读取**当前回合**的
+`turn_context.approvals_reviewer`。对 `Bash` / `apply_patch`，确认是
+`auto_review` 时不通知，`user` 时保留通知。无需把 `CODEX_NOTIFY_ON_PERMISSION`
+设为 0；既有通知开关仍由 `lib/send.sh` 处理，任务完成通知不受影响。
+
+这是有范围的兼容处理，不是“人工弹窗已出现”的可靠事件：
+
+- 应用/MCP 可单独指定 reviewer，所以这些工具不按会话模式过滤。
+- 只读 transcript 最后 2 MiB。回合未落盘、不在读取范围内、文件不可读、字段
+  缺失或不认识时，一律保留通知，不从全局配置或其他回合猜测。
+- transcript 格式不是稳定接口，升级后可能恢复误报；其他 hook 直接批准也仍
+  可能导致误报。自动审核拒绝后的用户沟通不属于这条审批通知链路。
+- 官方 app-server 有 `item/commandExecution/requestApproval` 等客户端审批协议，
+  但不是能直接注册到 `hooks.json` 的通知 hook。
+
+参考：[Hooks](https://learn.chatgpt.com/docs/hooks)、
+[Auto-review](https://learn.chatgpt.com/docs/sandboxing/auto-review)、
+[应用审核配置](https://learn.chatgpt.com/docs/config-file/config-reference)。
 
 ### Codex 的 hook 信任机制
 
@@ -65,9 +89,15 @@ TUI 里 `/statusline` 也是改这个键）。`tui.toml` 里是要写进 `[tui]`
 ```bash
 cd codex/hooks
 echo '{"hook_event_name":"Stop","cwd":"'$PWD'","last_assistant_message":"测试"}' | NOTIFY_DRY_RUN=1 bash notify.sh
-echo '{"hook_event_name":"PermissionRequest","cwd":"'$PWD'","tool_name":"shell"}' | NOTIFY_DRY_RUN=1 bash notify.sh
+echo '{"hook_event_name":"PermissionRequest","cwd":"'$PWD'","tool_name":"Bash"}' | NOTIFY_DRY_RUN=1 bash notify.sh
 ```
 
 端到端：装好后跑一轮 `codex exec "Reply with exactly the single word: pong"`，
 手机应收到"Codex 任务完成"（终端聚焦时会被静音，可 `NOTIFY_SKIP_WHEN_FOCUSED=0`
 前缀）。TUI 里 `/hooks` 应显示两条已信任的 hook。
+
+审批模式过滤回归测试（隔离配置，仅 dry-run，不发送通知）：
+
+```bash
+python3 codex/tests/test_notify.py
+```
