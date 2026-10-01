@@ -2,9 +2,8 @@
 # 通知推送内核（各 coding agent 共用）。
 #
 # 用法：printf '%s' "<正文>" | bash send.sh <kind> <project> <agent>
-#   kind     permission | permission_request | idle | stop | other
+#   kind     permission | idle | stop | other
 #            permission：agent 在等审批    idle：agent 停下等输入
-#            permission_request：已发起审批请求，尚不能确认是否需要用户处理
 #            stop：回合结束（正文 = 最后回复摘要，可为空）
 #            other：其他通知（正文 = 类型名或说明）
 #   project  项目名（一般是 cwd 的 basename）
@@ -83,14 +82,9 @@ if [ "$(setting NOTIFY_SHOW_HOST 1)" = "1" ]; then
 fi
 
 case "$kind" in
-  permission|permission_request)
+  permission)
     [ "$(setting NOTIFY_ON_PERMISSION 1)" = "0" ] && exit 0
-    if [ "$kind" = "permission_request" ]; then
-      # “发起了操作审批请求（可能由自动审核处理）”；不能把请求等同于人工待办。
-      msg=$(printf '\360\237\224\224 [%s] %s \345\217\221\350\265\267\344\272\206\346\223\215\344\275\234\345\256\241\346\211\271\350\257\267\346\261\202\357\274\210\345\217\257\350\203\275\347\224\261\350\207\252\345\212\250\345\256\241\346\240\270\345\244\204\347\220\206\357\274\211' "$tag" "$agent")
-    else
-      msg="🔔 [$tag] $agent 在等你批准一个操作"
-    fi ;;
+    msg="🔔 [$tag] $agent 在等你批准一个操作" ;;
   idle)
     [ "$(setting NOTIFY_ON_IDLE 1)" = "0" ] && exit 0
     msg="⏸️ [$tag] $agent 已停下，等待你的输入" ;;

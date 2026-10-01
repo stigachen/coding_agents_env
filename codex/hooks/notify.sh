@@ -17,15 +17,41 @@ event=$(echo "$input" | jq -r '.hook_event_name // empty')
 cwd=$(echo "$input" | jq -r '.cwd // empty')
 project=$(basename "${cwd:-unknown}")
 
+# PermissionRequest 不能直接等同于等待人工审批。hook 未提供 approvals_reviewer；
+# 用它给出的 transcript_path + turn_id 查本回合的 turn_context，不能读全局
+# config.toml（桌面端可逐会话切换模式）。只识别 Bash / apply_patch：应用和 MCP
+# 工具可能单独指定人工审核。transcript 不是稳定接口；缺字段、回合未落盘、
+# 格式变化等都返回 unknown，照常通知。
+permission_reviewer() {
+  local tool turn transcript
+  tool=$(printf '%s' "$input" | jq -r '.tool_name // empty')
+  case "$tool" in Bash|apply_patch) ;; *) return ;; esac
+  turn=$(printf '%s' "$input" | jq -r '.turn_id // empty')
+  transcript=$(printf '%s' "$input" | jq -r '.transcript_path // empty')
+  [ -n "$turn" ] && [ -n "$transcript" ] && [ -f "$transcript" ] && [ -r "$transcript" ] || return
+
+  # 有界读取，避免长会话耗尽 hook 超时预算；截断首行/未写完的末行按无效 JSON 忽略。
+  # 仅匹配当前 turn_id，绝不拿上一回合的自动审核状态来吞掉本回合的人工通知。
+  tail -c 2097152 "$transcript" 2>/dev/null | jq -Rn -r --arg turn "$turn" '
+    reduce inputs as $line ("unknown";
+      (try ($line | fromjson) catch null) as $row
+      | if ($row | type) == "object" and $row.type == "turn_context"
+          and ($row.payload | type) == "object" and $row.payload.turn_id == $turn
+        then ($row.payload.approvals_reviewer // "unknown")
+        else . end)
+    | if . == "auto_review" or . == "user" then . else "unknown" end
+  ' 2>/dev/null
+}
+
 case "$event" in
   Stop)
     echo "$input" | jq -r '.last_assistant_message // ""' \
       | bash "$SEND" stop "$project" Codex
     ;;
   PermissionRequest)
-    # hook 不含实际审核方；同回合切换模式后 transcript 的 reviewer 也可能过时。
-    # 只表达“发起审批请求”，不能据此静音或声称已经在等待用户。
-    printf '' | bash "$SEND" permission_request "$project" Codex
+    # 自动审核中的 shell / 文件修改不是用户待办；其他情况仍走统一通知内核。
+    [ "$(permission_reviewer)" = "auto_review" ] && exit 0
+    printf '' | bash "$SEND" permission "$project" Codex
     ;;
 esac
 exit 0
