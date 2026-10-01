@@ -11,7 +11,7 @@ Codex 读 `~/.codex/hooks.json`，格式和事件名与 Claude Code 的 hooks �
 | Codex 事件 | `send.sh` kind | 说明 |
 |---|---|---|
 | `Stop`（回合结束，附最后回复摘要） | `stop` | |
-| `PermissionRequest`（进入审批流程之前） | `permission` | 已确认自动审核的 shell / 文件修改请求不通知；其他请求照常通知。本脚本不输出审批决策 |
+| `PermissionRequest`（进入审批流程之前） | `permission_request` | 通知“发起了操作审批请求（可能由自动审核处理）”，不输出审批决策 |
 
 Codex 没有 Claude 那种"停下 60 秒没人理"的 idle 事件，所以这里没有 `idle`。
 hook 退出非 0 或超时只会在 Codex 的 hook 列表里标一条 Failed，不影响 Codex 运行。
@@ -21,24 +21,25 @@ hook 退出非 0 或超时只会在 Codex 的 hook 列表里标一条 Failed，�
 `PermissionRequest` 不代表已经弹出人工审批框：自动审核或其他 hook 可以接手
 请求。因此仅凭这个事件就推送“在等你批准”会产生误报。
 
-适配层利用 hook 的 `transcript_path` 和 `turn_id`，读取**当前回合**的
-`turn_context.approvals_reviewer`。对 `Bash` / `apply_patch`，确认是
-`auto_review` 时不通知，`user` 时保留通知。无需把 `CODEX_NOTIFY_ON_PERMISSION`
-设为 0；既有通知开关仍由 `lib/send.sh` 处理，任务完成通知不受影响。
+当前 hook 没有提供实际审核方。也不能从 transcript 推断：Codex 0.159.3 支持
+在**同一回合内**通过 `turn/settings/update` 切换 `approvals_reviewer`，而
+`turn_context.approvals_reviewer` 仍可能是回合开始时的值。例如回合以自动审核
+开始，中途切回人工审核，按 transcript 的旧值静音就会漏掉真实人工待办。
+即使精确匹配 `turn_id` 或取最后一条 context，也无法保证状态新鲜。
 
-这是有范围的兼容处理，不是“人工弹窗已出现”的可靠事件：
+因此适配层将事件翻译成 `permission_request`，统一内核使用中性文案，保留通知。
+`NOTIFY_ON_PERMISSION` / `CODEX_NOTIFY_ON_PERMISSION` 仍控制这类通知，任务完成
+通知不受影响。这只修正文案并防止按过期状态漏报，**不会减少自动审核事件的
+通知次数**。
 
-- 应用/MCP 可单独指定 reviewer，所以这些工具不按会话模式过滤。
-- 只读 transcript 最后 2 MiB。回合未落盘、不在读取范围内、文件不可读、字段
-  缺失或不认识时，一律保留通知，不从全局配置或其他回合猜测。
-- transcript 格式不是稳定接口，升级后可能恢复误报；其他 hook 直接批准也仍
-  可能导致误报。自动审核拒绝后的用户沟通不属于这条审批通知链路。
-- 官方 app-server 有 `item/commandExecution/requestApproval` 等客户端审批协议，
-  但不是能直接注册到 `hooks.json` 的通知 hook。
+要只提醒实际等待人工审批的请求，需要上游提供可靠的实际审核方或人工待办
+事件。官方 app-server 有 `item/commandExecution/requestApproval` 等客户端
+审批协议，但不是能直接注册到 `hooks.json` 的通知 hook。
 
 参考：[Hooks](https://learn.chatgpt.com/docs/hooks)、
 [Auto-review](https://learn.chatgpt.com/docs/sandboxing/auto-review)、
-[应用审核配置](https://learn.chatgpt.com/docs/config-file/config-reference)。
+[应用审核配置](https://learn.chatgpt.com/docs/config-file/config-reference)、
+[同回合切换 reviewer 的上游测试](https://github.com/openai/codex/blob/rust-v0.159.3/codex-rs/app-server/tests/suite/v2/turn_settings_update.rs#L425-L525)。
 
 ### Codex 的 hook 信任机制
 
@@ -96,7 +97,7 @@ echo '{"hook_event_name":"PermissionRequest","cwd":"'$PWD'","tool_name":"Bash"}'
 手机应收到"Codex 任务完成"（终端聚焦时会被静音，可 `NOTIFY_SKIP_WHEN_FOCUSED=0`
 前缀）。TUI 里 `/hooks` 应显示两条已信任的 hook。
 
-审批模式过滤回归测试（隔离配置，仅 dry-run，不发送通知）：
+审批通知回归测试（隔离配置，仅 dry-run，不发送通知）：
 
 ```bash
 python3 codex/tests/test_notify.py

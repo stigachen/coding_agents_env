@@ -7,6 +7,7 @@
 | kind | 含义 | 通知内容 |
 |---|---|---|
 | `permission` | agent 在等你批准一个操作 | 🔔 [项目@主机] Claude 在等你批准一个操作 |
+| `permission_request` | 发起审批请求，尚不能确认实际审核方 | 🔔 [项目@主机] Codex 发起了操作审批请求（可能由自动审核处理） |
 | `idle` | agent 停下后一段时间无人输入 | ⏸️ [项目@主机] Claude 已停下，等待你的输入 |
 | `stop` | 回合结束 | ✅ [项目@主机] Claude 任务完成 + 最后回复摘要 |
 | `other` | 其他通知 | 🔔 [项目@主机] Claude 通知：<正文> |
@@ -51,7 +52,7 @@ hook 配置里不设 matcher 过滤，事件先到 `send.sh` 再按开关决定�
 
 | 开关 | 默认 | 作用 |
 |---|---|---|
-| `NOTIFY_ON_PERMISSION` | 1 | 待审批通知 |
+| `NOTIFY_ON_PERMISSION` | 1 | 待审批 / 审批请求通知（`permission` 和 `permission_request` 共用） |
 | `NOTIFY_ON_IDLE` | 1 | 等输入通知 |
 | `NOTIFY_ON_STOP` | 1 | 回合结束通知 |
 | `NOTIFY_SKIP_WHEN_FOCUSED` | 1 | 前台静音（见下文） |

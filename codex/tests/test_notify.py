@@ -9,6 +9,7 @@ import unittest
 
 
 HOOK = Path(__file__).resolve().parents[1] / "hooks" / "notify.sh"
+SEND = HOOK.parents[2] / "lib" / "send.sh"
 
 
 def context(turn, reviewer):
@@ -33,7 +34,16 @@ class NotifyTest(unittest.TestCase):
             "NOTIFY_SHOW_HOST": "0",
         }
 
-    def run_hook(self, transcript, **overrides):
+    def run_script(self, script, data, *args):
+        result = subprocess.run(
+            ["/bin/bash", str(script), *args], input=data,
+            text=True, capture_output=True, env=self.env, timeout=5,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stderr, "")
+        return result.stdout
+
+    def run_hook(self, transcript="", **overrides):
         self.transcript.write_text(transcript)
         event = {
             "hook_event_name": "PermissionRequest", "cwd": "/tmp/project",
@@ -41,38 +51,39 @@ class NotifyTest(unittest.TestCase):
             "transcript_path": str(self.transcript),
         }
         event.update(overrides)
-        result = subprocess.run(
-            ["/bin/bash", str(HOOK)], input=json.dumps(event),
-            text=True, capture_output=True, env=self.env, timeout=5,
+        return self.run_script(HOOK, json.dumps(event))
+
+    def assert_permission_request(self, output):
+        header, message = output.splitlines()
+        self.assertIn("kind=permission_request", header.split())
+        self.assertEqual(
+            message,
+            "🔔 [project] Codex 发起了操作审批请求（可能由自动审核处理）",
         )
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stderr, "")
-        return result.stdout
+        self.assertNotIn("在等你批准", output)
 
-    def test_auto_review_shell_and_patch_are_silent(self):
-        for tool in ("Bash", "apply_patch"):
-            with self.subTest(tool=tool):
-                self.assertEqual(self.run_hook(context("current", "auto_review"),
-                                               tool_name=tool), "")
+    def test_transcript_reviewer_does_not_determine_notification(self):
+        for reviewer in ("auto_review", "user"):
+            for tool in ("Bash", "apply_patch"):
+                with self.subTest(reviewer=reviewer, tool=tool):
+                    self.assert_permission_request(self.run_hook(
+                        context("current", reviewer), tool_name=tool))
 
-    def test_human_approval_is_preserved(self):
-        self.assertIn("kind=permission", self.run_hook(context("current", "user")))
-
-    def test_previous_turn_cannot_suppress_current(self):
-        self.assertIn("kind=permission", self.run_hook(context("old", "auto_review")))
-        self.assertIn("kind=permission", self.run_hook(
-            context("old", "auto_review") + context("current", "user")))
-
-    def test_last_context_for_same_turn_wins(self):
-        self.assertIn("kind=permission", self.run_hook(
-            context("current", "auto_review") + context("current", "user")))
-        self.assertEqual(self.run_hook(
-            context("current", "user") + context("current", "auto_review")), "")
+    def test_same_turn_switch_to_user_with_stale_transcript_keeps_notification(self):
+        # turn/settings/update can switch the live reviewer to user without
+        # updating turn_context. The hook input is identical to auto-review,
+        # so the initial transcript value cannot justify suppressing this alert.
+        initial_context = context("current", "auto_review")
+        before_live_switch = self.run_hook(initial_context)
+        # Only the in-memory reviewer changes; no fresh context is persisted.
+        after_live_switch = self.run_hook(initial_context)
+        self.assert_permission_request(after_live_switch)
+        self.assertEqual(after_live_switch, before_live_switch)
 
     def test_mcp_and_unknown_tools_keep_notifications(self):
-        for tool in ("mcp__example__write", "mcp__codex_apps__example", "new_tool", ""):
+        for tool in ("mcp__example__write", "mcp__codex_apps__example", "new_tool", "", None):
             with self.subTest(tool=tool):
-                self.assertIn("kind=permission", self.run_hook(
+                self.assert_permission_request(self.run_hook(
                     context("current", "auto_review"), tool_name=tool))
 
     def test_missing_or_unknown_metadata_keeps_notifications(self):
@@ -80,32 +91,49 @@ class NotifyTest(unittest.TestCase):
                      context("current", "future_mode"),
                      '{"type":"turn_context","payload":{}}\n'):
             with self.subTest(data=data):
-                self.assertIn("kind=permission", self.run_hook(data))
+                self.assert_permission_request(self.run_hook(data))
         for override in ({"turn_id": None}, {"transcript_path": None},
                          {"transcript_path": str(self.root / "missing")},
                          {"transcript_path": str(self.root)}):
             with self.subTest(override=override):
-                self.assertIn("kind=permission", self.run_hook(
+                self.assert_permission_request(self.run_hook(
                     context("current", "auto_review"), **override))
 
-    def test_bad_and_partial_lines_do_not_hide_valid_context(self):
-        data = 'broken\nnull\n[]\n42\n' + context("current", "auto_review") + '{"partial":'
-        self.assertEqual(self.run_hook(data), "")
+    def test_minimal_permission_request_needs_no_reviewer_or_tool_metadata(self):
+        self.assert_permission_request(self.run_script(HOOK, json.dumps({
+            "hook_event_name": "PermissionRequest", "cwd": "/tmp/project",
+        })))
 
-    def test_bounded_read(self):
-        padding = json.dumps({"type": "response_item", "data": "x" * 2100000}) + "\n"
-        self.assertEqual(self.run_hook(padding + context("current", "auto_review")), "")
-        self.assertIn("kind=permission", self.run_hook(context("current", "auto_review") + padding))
+    def test_permission_mode_cannot_identify_reviewer(self):
+        for mode in ("default", "bypassPermissions", "future_mode", None):
+            with self.subTest(mode=mode):
+                self.assert_permission_request(self.run_hook(permission_mode=mode))
 
     def test_stop_notification_is_unchanged(self):
         output = self.run_hook(context("current", "auto_review"),
                                hook_event_name="Stop", last_assistant_message="completed")
-        self.assertIn("kind=stop", output)
-        self.assertIn("completed", output)
+        header, message, body = output.splitlines()
+        self.assertIn("kind=stop", header.split())
+        self.assertEqual(message, "✅ [project] Codex 任务完成")
+        self.assertEqual(body, "completed")
 
-    def test_existing_switch_still_controls_human_notifications(self):
-        (self.root / "notify.env").write_text("CODEX_NOTIFY_ON_PERMISSION=0\n")
-        self.assertEqual(self.run_hook(context("current", "user")), "")
+    def test_existing_global_and_scoped_permission_switches_still_apply(self):
+        for key in ("NOTIFY_ON_PERMISSION", "CODEX_NOTIFY_ON_PERMISSION"):
+            for reviewer in ("auto_review", "user"):
+                with self.subTest(key=key, reviewer=reviewer):
+                    (self.root / "notify.env").write_text(f"{key}=0\n")
+                    self.assertEqual(self.run_hook(context("current", reviewer)), "")
+
+    def test_codex_permission_switch_overrides_global_switch(self):
+        (self.root / "notify.env").write_text(
+            "NOTIFY_ON_PERMISSION=0\nCODEX_NOTIFY_ON_PERMISSION=1\n")
+        self.assert_permission_request(self.run_hook())
+
+    def test_manual_permission_wording_is_unchanged_for_claude(self):
+        output = self.run_script(SEND, "", "permission", "project", "Claude")
+        header, message = output.splitlines()
+        self.assertIn("kind=permission", header.split())
+        self.assertEqual(message, "🔔 [project] Claude 在等你批准一个操作")
 
 
 if __name__ == "__main__":
