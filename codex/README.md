@@ -10,11 +10,34 @@ Codex 读 `~/.codex/hooks.json`，格式和事件名与 Claude Code 的 hooks �
 
 | Codex 事件 | `send.sh` kind | 说明 |
 |---|---|---|
-| `Stop`（回合结束，附最后回复摘要） | `stop` | |
+| `Stop`（回合结束，附最后回复摘要） | `stop` / `stop_without_transcript` | 显式 `transcript_path: null` 默认静音，其余照常通知 |
 | `PermissionRequest`（进入审批流程之前） | `permission` | 已确认自动审核的 shell / 文件修改请求不通知；其他请求照常通知。本脚本不输出审批决策 |
 
 Codex 没有 Claude 那种"停下 60 秒没人理"的 idle 事件，所以这里没有 `idle`。
 hook 退出非 0 或超时只会在 Codex 的 hook 列表里标一条 Failed，不影响 Codex 运行。
+
+### 未提供会话记录路径的完成通知
+
+Codex 桌面端会用临时会话在后台生成项目建议，即使结果是 `{"suggestions":[]}`
+也会触发 `Stop`。这类会话没有持久记录，hook 收到 `transcript_path: null`。
+适配层把**字段存在且值严格为 JSON null** 的 `Stop` 翻译成
+`stop_without_transcript`，通知内核默认静音；不检查回复正文、模型或审批模式。
+字段缺失、空字符串、非空路径但文件不存在/不可读时，仍按普通 `stop` 通知。
+
+**这个条件不能精确区分后台任务与用户任务，也不证明会话没有远程记录。** Codex 0.160.0 的 shell hook
+输入没有桌面端的 `threadSource` / `turnTrigger` 标记。手动运行
+`codex exec --ephemeral`、临时侧聊、没有本地 transcript 路径的远程存储会话，
+以及 Codex 读取记录路径出错而返回 null 的情况，也会被静音。这是本过滤的
+明确范围，审批通知不受影响。
+
+需要这些完成通知时，在 `~/.config/coding_agents_env/notify.env` 设置
+`CODEX_NOTIFY_ON_STOP_WITHOUT_TRANSCRIPT=1` 即时恢复（后台建议通知也会恢复）。
+`NOTIFY_ON_STOP=0` / `CODEX_NOTIFY_ON_STOP=0` 仍可关闭全部完成通知。
+旧配置文件没有新增键时也使用默认值 0，无需重新安装。
+
+实现依据（Codex 0.160.0）：[Stop hook 输入字段](https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/hooks/src/events/stop.rs#L147-L167)、
+[路径为空或读取出错的处理](https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/core/src/session/mod.rs#L5071-L5089)、
+[远程存储不提供本地路径](https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/thread-store/src/live_thread.rs#L406-L420)。
 
 ### “帮我批准”模式下的审批通知
 
@@ -114,7 +137,7 @@ echo '{"hook_event_name":"PermissionRequest","cwd":"'$PWD'","tool_name":"Bash"}'
 手机应收到"Codex 任务完成"（终端聚焦时会被静音，可 `NOTIFY_SKIP_WHEN_FOCUSED=0`
 前缀）。TUI 里 `/hooks` 应显示两条已信任的 hook。
 
-审批模式过滤回归测试（隔离配置，仅 dry-run，不发送通知）：
+审批模式和完成通知过滤回归测试（隔离配置，仅 dry-run，不发送通知）：
 
 ```bash
 python3 codex/tests/test_notify.py
