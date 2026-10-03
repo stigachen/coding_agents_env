@@ -2,8 +2,10 @@
 # 通知推送内核（各 coding agent 共用）。
 #
 # 用法：printf '%s' "<正文>" | bash send.sh <kind> <project> <agent>
-#   kind     permission | idle | stop | stop_without_transcript | other
+#   kind     permission | permission_without_transcript | idle |
+#            stop | stop_without_transcript | other
 #            permission：agent 在等审批    idle：agent 停下等输入
+#            permission_without_transcript：明确未提供记录路径的审批通知，默认静音
 #            stop：回合结束（正文 = 最后回复摘要，可为空）
 #            stop_without_transcript：明确未提供记录路径的回合结束，默认静音
 #            other：其他通知（正文 = 类型名或说明）
@@ -83,8 +85,11 @@ if [ "$(setting NOTIFY_SHOW_HOST 1)" = "1" ]; then
 fi
 
 case "$kind" in
-  permission)
+  permission|permission_without_transcript)
     [ "$(setting NOTIFY_ON_PERMISSION 1)" = "0" ] && exit 0
+    if [ "$kind" = "permission_without_transcript" ] && [ "$(setting NOTIFY_ON_PERMISSION_WITHOUT_TRANSCRIPT 0)" != "1" ]; then
+      exit 0
+    fi
     msg="🔔 [$tag] $agent 在等你批准一个操作" ;;
   idle)
     [ "$(setting NOTIFY_ON_IDLE 1)" = "0" ] && exit 0
