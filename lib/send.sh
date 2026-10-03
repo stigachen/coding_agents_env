@@ -2,9 +2,10 @@
 # 通知推送内核（各 coding agent 共用）。
 #
 # 用法：printf '%s' "<正文>" | bash send.sh <kind> <project> <agent>
-#   kind     permission | idle | stop | other
+#   kind     permission | idle | stop | stop_without_transcript | other
 #            permission：agent 在等审批    idle：agent 停下等输入
 #            stop：回合结束（正文 = 最后回复摘要，可为空）
+#            stop_without_transcript：明确未提供记录路径的回合结束，默认静音
 #            other：其他通知（正文 = 类型名或说明）
 #   project  项目名（一般是 cwd 的 basename）
 #   agent    调用方名字，显示在消息里：Claude / Codex / OpenCode / Grok …
@@ -88,8 +89,11 @@ case "$kind" in
   idle)
     [ "$(setting NOTIFY_ON_IDLE 1)" = "0" ] && exit 0
     msg="⏸️ [$tag] $agent 已停下，等待你的输入" ;;
-  stop)
+  stop|stop_without_transcript)
     [ "$(setting NOTIFY_ON_STOP 1)" = "0" ] && exit 0
+    if [ "$kind" = "stop_without_transcript" ] && [ "$(setting NOTIFY_ON_STOP_WITHOUT_TRANSCRIPT 0)" != "1" ]; then
+      exit 0
+    fi
     # 摘要按字符（codepoint）截断，不能用 head -c：按字节截会把 UTF-8 多字节
     # 字符切成两半，Telegram 会以 400 "strings must be encoded in UTF-8" 拒收
     last=$(printf '%s' "$body" | jq -Rrs '.[0:120]' 2>/dev/null)

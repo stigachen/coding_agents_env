@@ -45,8 +45,16 @@ permission_reviewer() {
 
 case "$event" in
   Stop)
+    # Desktop background suggestions use ephemeral sessions and explicitly send
+    # transcript_path: null. Command hooks do not expose their task source, so
+    # classify this as a transcript-less stop, not as a confirmed background job.
+    # Missing/empty fields and unavailable files remain ordinary stops.
+    kind=stop
+    if printf '%s' "$input" | jq -e 'has("transcript_path") and .transcript_path == null' >/dev/null 2>&1; then
+      kind=stop_without_transcript
+    fi
     echo "$input" | jq -r '.last_assistant_message // ""' \
-      | bash "$SEND" stop "$project" Codex
+      | bash "$SEND" "$kind" "$project" Codex
     ;;
   PermissionRequest)
     # 自动审核中的 shell / 文件修改不是用户待办；其他情况仍走统一通知内核。

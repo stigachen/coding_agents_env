@@ -9,6 +9,7 @@
 | `permission` | agent 在等你批准一个操作 | 🔔 [项目@主机] Claude 在等你批准一个操作 |
 | `idle` | agent 停下后一段时间无人输入 | ⏸️ [项目@主机] Claude 已停下，等待你的输入 |
 | `stop` | 回合结束 | ✅ [项目@主机] Claude 任务完成 + 最后回复摘要 |
+| `stop_without_transcript` | 明确未提供会话记录路径的回合结束 | 默认静音；开启后与 `stop` 相同 |
 | `other` | 其他通知 | 🔔 [项目@主机] Claude 通知：<正文> |
 
 消息里的 agent 名随调用方变化（Claude / Codex / OpenCode / Grok）。前缀里的
@@ -54,6 +55,7 @@ hook 配置里不设 matcher 过滤，事件先到 `send.sh` 再按开关决定�
 | `NOTIFY_ON_PERMISSION` | 1 | 待审批通知 |
 | `NOTIFY_ON_IDLE` | 1 | 等输入通知 |
 | `NOTIFY_ON_STOP` | 1 | 回合结束通知 |
+| `CODEX_NOTIFY_ON_STOP_WITHOUT_TRANSCRIPT` | 0 | Codex 明确未提供会话记录路径的完成通知；设 1 恢复，仍受 `NOTIFY_ON_STOP` / `CODEX_NOTIFY_ON_STOP` 控制，范围见 [Codex 说明](../codex/README.md#未提供会话记录路径的完成通知) |
 | `NOTIFY_SKIP_WHEN_FOCUSED` | 1 | 前台静音（见下文） |
 | `NOTIFY_FOCUS_MAX_IDLE` | 120 | 前台静音的"人已走开"阈值（秒） |
 | `DESKTOP_NOTIFY` | 0 | macOS 本机桌面弹窗 |
