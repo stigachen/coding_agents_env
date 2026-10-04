@@ -1,8 +1,8 @@
 # lib — 各 agent 共用的通知内核
 
 把 coding agent 的关键事件推送到手机/IM，解决"命令行窗口放到后台就看不见了"
-的问题。Claude Code / Codex / OpenCode 各自的目录里只有一层薄适配，把自家事件
-翻译成这里的调用；开关、措辞、前台静音、渠道推送全在这里，三家行为一致。
+的问题。Claude Code / Codex / OpenCode / Grok CLI 各自的目录里只有一层薄适配，
+把自家事件翻译成这里的调用；开关、措辞、前台静音、渠道推送全在这里统一处理。
 
 | kind | 含义 | 通知内容 |
 |---|---|---|
@@ -62,8 +62,8 @@ hook 配置里不设 matcher 过滤，事件先到 `send.sh` 再按开关决定�
 | `NOTIFY_FOCUS_MAX_IDLE` | 120 | 前台静音的"人已走开"阈值（秒） |
 | `DESKTOP_NOTIFY` | 0 | macOS 本机桌面弹窗 |
 | `NOTIFY_SHOW_HOST` | 1 | 消息前缀带主机名 `[项目@主机]` |
-| `NOTIFY_DEBUG` | 0 | 排障日志，写入 `~/.claude/notify-debug.log` |
-| `NOTIFY_FROM_GROK` | 0 | （Claude 专属）是否推送 Grok CLI 触发的事件，见 [claude/hooks/README.md](../claude/hooks/README.md) |
+| `NOTIFY_DEBUG` | 0 | 排障日志；Grok 写入共用配置目录的 `notify-debug.log`，其他 agent 保留 `~/.claude/notify-debug.log` |
+| `GROK_NOTIFY_ENABLED` | 1 | Grok 原生通知总开关；升级时保留旧开关值，见下文和 [Grok 说明](../grok/README.md) |
 | `CLAUDE_STATUSLINE_USAGE_API` | 0 | （Claude 状态栏用）设 1 后额外显示按模型的周配额，详见 [claude/statusline/README.md](../claude/statusline/README.md) |
 
 **临时覆盖**：环境变量或命令行前缀里已设的键优先于文件，测试时可以
@@ -78,7 +78,15 @@ Codex 的回合结束通知，`OPENCODE_DESKTOP_NOTIFY=1` 只给 OpenCode 开桌
 `<AGENT>_KEY` → `KEY` → 默认值，判的是"是否设置"而非"是否非空"：前缀键留空
 （`CODEX_DISCORD_WEBHOOK_URL=`）表示对该 agent 明确关掉，不回退通用键。
 `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` 成对解析，只覆盖其中一个会跳过
-Telegram（`NOTIFY_DEBUG=1` 时日志里有提示）。
+Telegram（`NOTIFY_DEBUG=1` 时日志里有提示）。Grok 同样使用这套规则，例如
+`GROK_NOTIFY_ON_STOP=0`、`GROK_DESKTOP_NOTIFY=1`、`GROK_DISCORD_WEBHOOK_URL=…`；
+未提供 Grok 专属值时继承公共设置。
+
+**Grok 总开关迁移**：`GROK_NOTIFY_ENABLED` 优先；没有新键时，依次读取旧
+`GROK_NOTIFY_FROM_GROK`、`NOTIFY_FROM_GROK`，都没有时默认 1。安装器按这个顺序
+补齐新键，保留用户原值，所以旧配置中的 0 不会被升级自动开启。新安装默认启用。
+该总开关由通知内核处理，其他 agent 不受影响；Grok 原生入口和 Claude 兼容入口
+的分工见 [Grok 说明](../grok/README.md)。
 
 `stop` 每个回合都触发，包括你在旁边正常交互的短回合。嫌吵可设
 `NOTIFY_ON_STOP=0`，只保留"待审批 / 等输入"两类通知 ——
@@ -133,7 +141,8 @@ agent 所在终端窗口**有键盘焦点**时，跳过所有推送（IM + 桌�
 - 推送优先用系统原生 `System32\curl.exe`（不存在时退回 `curl`），消息数据
   全走 stdin，两种 curl 下 UTF-8 均不受 argv 编码转换影响。
 - 排障时设 `NOTIFY_DEBUG=1`，每次事件的判定和推送结果（curl 退出码与响应）
-  会写入 `~/.claude/notify-debug.log`。
+  Grok 写入 `${CODING_AGENTS_ENV_DIR:-$HOME/.config/coding_agents_env}/notify-debug.log`；
+  其他 agent 仍写入 `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/notify-debug.log`。
 
 ## 手工测试
 

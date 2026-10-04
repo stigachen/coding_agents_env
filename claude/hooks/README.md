@@ -18,24 +18,19 @@
 只增删本仓库自己的条目（按 `/hooks/notify.sh` 路径特征识别），其他工具注册的
 hook 一律不动。
 
-## 来自 Grok CLI 的事件（默认忽略）
+## Grok CLI 兼容入口
 
-xAI 的 Grok CLI 带 "Claude Code 兼容" 功能（`~/.grok/config.toml` 里
-`[compat.claude] hooks`，默认开），会原样执行 `~/.claude/settings.json` 中的
-hooks——于是 Grok 的每个回合结束、每条 idle 提示也会跑到 `notify.sh`，推出
-一堆没有正文、类型显示为 `notification` 的"任务完成"（Grok 的载荷是
-camelCase：`lastAssistantMessage` / `notificationType`，且 Grok 会话结束时也
-触发一次 `Stop`）。
+Grok CLI 的 Claude 兼容功能可能执行 `~/.claude/settings.json` 中的 hooks。
+本入口检测到非空 `GROK_HOOK_EVENT` 时直接退出，避免与
+[`grok/hooks/notify.sh`](../../grok/README.md) 的原生入口重复通知；Claude Code
+自己的事件不受影响。Grok 通知请执行 `bash install.sh grok` 安装原生 hooks，
+不再经过这里，也不依赖 Claude Code。从旧实现升级时，git pull 到注册原生
+hooks 之间 Grok 通知会暂停，需执行上述安装命令完成切换。
 
-`notify.sh` 通过 Grok 为每个 hook 注入的 `GROK_HOOK_EVENT` 环境变量识别调用方，
-把 agent 标成 `Grok` 交给 `send.sh`：
-
-- `NOTIFY_FROM_GROK=0`（默认）：Grok 触发的事件一律忽略，Claude Code 的不受影响。
-- `NOTIFY_FROM_GROK=1`：照常推送，消息里标成 "Grok"，字段按 camelCase 读取，
-  `NOTIFY_ON_*` 各开关同样生效（也可用 `GROK_` 前缀单独设）。
-
-不想让 Grok 碰 Claude 的 hooks，也可以在 Grok 侧关掉：`~/.grok/config.toml`
-加 `[compat.claude]` / `hooks = false`，或设环境变量 `GROK_CLAUDE_HOOKS_ENABLED=0`。
+安装器不会修改 Grok 的 `[compat.claude] hooks` 或第三方 hooks；其他 Claude
+兼容能力继续按用户原有配置运行。Grok 总开关改为 `GROK_NOTIFY_ENABLED`，旧
+`GROK_NOTIFY_FROM_GROK` / `NOTIFY_FROM_GROK` 会按原值迁移，详见
+[Grok 配置与旧版迁移](../../grok/README.md#配置与旧版迁移)。
 
 ## 手工测试
 
@@ -44,7 +39,7 @@ cd claude/hooks
 # dry-run：只打印判定和消息
 echo '{"hook_event_name":"Notification","notification_type":"permission_prompt","cwd":"'$PWD'"}' | NOTIFY_DRY_RUN=1 bash notify.sh
 echo '{"hook_event_name":"Stop","last_assistant_message":"测试消息","cwd":"'$PWD'"}' | NOTIFY_DRY_RUN=1 bash notify.sh
-# 模拟 Grok 调用：默认应无任何输出；notify.env 设 NOTIFY_FROM_GROK=1 后会标为 Grok
+# 模拟 Grok 兼容调用：应无任何输出；Grok 通知只走原生入口
 echo '{"hook_event_name":"Stop","lastAssistantMessage":"来自 Grok","cwd":"'$PWD'"}' | GROK_HOOK_EVENT=stop NOTIFY_DRY_RUN=1 bash notify.sh
 # 真发到手机（终端聚焦时会被静音）
 echo '{"hook_event_name":"Notification","notification_type":"permission_prompt","cwd":"'$PWD'"}' | NOTIFY_SKIP_WHEN_FOCUSED=0 bash notify.sh

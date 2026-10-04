@@ -9,6 +9,7 @@
 #        claude/    → ~/.claude/settings.json 的 statusLine + Notification/Stop hooks
 #        codex/     → ~/.codex/hooks.json + config.toml 的 [tui] status_line
 #        opencode/  → ~/.config/opencode/plugins/ 的通知插件
+#        grok/      → ~/.grok/hooks/coding_agents_env.json 的原生通知 hooks
 #      也可只装指定的：bash install.sh claude
 #
 # 原则：只增删本仓库自己的条目（按脚本路径特征识别），机器上已有的其他工具
@@ -70,7 +71,7 @@ elif [ -f "$LEGACY_ENV" ] && [ ! -L "$LEGACY_ENV" ]; then
 fi
 
 # 改名过的键：旧键有值、新键缺失时，用旧值生成新键（不用模板默认值覆盖用户设置）
-RENAMED_KEYS="STATUSLINE_USAGE_API:CLAUDE_STATUSLINE_USAGE_API"
+RENAMED_KEYS="STATUSLINE_USAGE_API:CLAUDE_STATUSLINE_USAGE_API GROK_NOTIFY_FROM_GROK:GROK_NOTIFY_ENABLED NOTIFY_FROM_GROK:GROK_NOTIFY_ENABLED"
 for pair in $RENAMED_KEYS; do
   old=${pair%%:*}; new=${pair##*:}
   if grep -q "^${old}=" "$ENV_FILE" && ! grep -q "^${new}=" "$ENV_FILE"; then
@@ -102,6 +103,7 @@ else
   { [ -d "$CLAUDE_DIR" ] || command -v claude >/dev/null 2>&1; } && agents="$agents claude"
   { [ -d "${CODEX_HOME:-$HOME/.codex}" ] || command -v codex >/dev/null 2>&1; } && agents="$agents codex"
   { [ -d "$HOME/.config/opencode" ] || command -v opencode >/dev/null 2>&1; } && agents="$agents opencode"
+  { [ -d "${GROK_HOME:-$HOME/.grok}" ] || command -v grok >/dev/null 2>&1; } && agents="$agents grok"
 fi
 
 installed=""
@@ -113,7 +115,7 @@ for a in $agents; do
     echo "ℹ️  跳过 ${a}：本仓库尚无 $a/install.sh"
   fi
 done
-[ -n "$installed" ] || { echo "未检测到任何受支持的 agent（claude / codex / opencode）" >&2; exit 1; }
+[ -n "$installed" ] || { echo "未检测到任何受支持的 agent（claude / codex / opencode / grok）" >&2; exit 1; }
 
 echo ""
 echo "✅ 安装完成：$installed"
