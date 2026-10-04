@@ -11,7 +11,7 @@ Codex 读 `~/.codex/hooks.json`，格式和事件名与 Claude Code 的 hooks �
 | Codex 事件 | `send.sh` kind | 说明 |
 |---|---|---|
 | `Stop`（回合结束，附最后回复摘要） | `stop` / `stop_without_transcript` | 显式 `transcript_path: null` 默认静音，其余照常通知 |
-| `PermissionRequest`（进入审批流程之前） | `permission` | 已确认自动审核的 shell / 文件修改请求不通知；其他请求照常通知。本脚本不输出审批决策 |
+| `PermissionRequest`（进入审批流程之前） | `permission` / `permission_without_transcript` | 显式 `transcript_path: null` 默认静音；有记录路径时仍只过滤已确认自动审核的 shell / 文件修改。本脚本不输出审批决策 |
 
 Codex 没有 Claude 那种"停下 60 秒没人理"的 idle 事件，所以这里没有 `idle`。
 hook 退出非 0 或超时只会在 Codex 的 hook 列表里标一条 Failed，不影响 Codex 运行。
@@ -28,7 +28,7 @@ Codex 桌面端会用临时会话在后台生成项目建议，即使结果是 `
 输入没有桌面端的 `threadSource` / `turnTrigger` 标记。手动运行
 `codex exec --ephemeral`、临时侧聊、没有本地 transcript 路径的远程存储会话，
 以及 Codex 读取记录路径出错而返回 null 的情况，也会被静音。这是本过滤的
-明确范围，审批通知不受影响。
+明确范围。完成通知开关本身不影响审批通知，后者由下节的独立开关控制。
 
 需要这些完成通知时，在 `~/.config/coding_agents_env/notify.env` 设置
 `CODEX_NOTIFY_ON_STOP_WITHOUT_TRANSCRIPT=1` 即时恢复（后台建议通知也会恢复）。
@@ -38,6 +38,28 @@ Codex 桌面端会用临时会话在后台生成项目建议，即使结果是 `
 实现依据（Codex 0.160.0）：[Stop hook 输入字段](https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/hooks/src/events/stop.rs#L147-L167)、
 [路径为空或读取出错的处理](https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/core/src/session/mod.rs#L5071-L5089)、
 [远程存储不提供本地路径](https://github.com/openai/codex/blob/rust-v0.160.0/codex-rs/thread-store/src/live_thread.rs#L406-L420)。
+
+### 未提供会话记录路径的审批通知
+
+后台建议任务还会访问连接的应用，一次运行可能产生多条 `PermissionRequest`，
+即使完成通知已静音，也会连续推送“在等你批准”。这类无项目任务的 `cwd` 可为
+`/`，因此通知标签显示为 `[/@主机]`；目录名不是过滤条件。
+
+适配层对审批事件使用与完成通知相同的严格 null 判定，映射成
+`permission_without_transcript`，由通知内核默认静音，包含 shell、应用/MCP
+及其他工具。字段缺失、空字符串、非空路径但文件不存在/不可读时不按这个条件
+静音；原有自动审核过滤仍然生效。有记录路径的 MCP 审批通知继续保留。
+
+**这也会静音 `--ephemeral`、临时侧聊、无本地路径的远程会话，以及路径读取
+失败返回 null 时的真实人工审批提醒。** 通知静音不代表操作已获批准：脚本不
+输出审批决策，任务仍可能停下等待人工确认。需要这些提醒时，在 `notify.env`
+设 `CODEX_NOTIFY_ON_PERMISSION_WITHOUT_TRANSCRIPT=1` 即时恢复；后台建议任务的
+审批提醒也会恢复。没有新增键的旧配置使用默认值 0。
+
+两个 `_WITHOUT_TRANSCRIPT` 开关相互独立，分别仍受对应的完成/审批总开关
+控制；开启审批专属开关不能绕过 `CODEX_NOTIFY_ON_PERMISSION=0`，关闭完成
+通知也不会关闭审批通知。Claude Code 和 OpenCode 继续使用普通通知类型，
+不会进入这两个新增分类。
 
 ### “帮我批准”模式下的审批通知
 
@@ -51,9 +73,11 @@ Codex 桌面端会用临时会话在后台生成项目建议，即使结果是 `
 
 这是有范围的兼容处理，不是“人工弹窗已出现”的可靠事件：
 
-- 应用/MCP 可单独指定 reviewer，所以这些工具不按会话模式过滤。
+- 应用/MCP 可单独指定 reviewer，所以这些工具不按会话模式过滤；显式 null
+  的审批通知另由上节的开关控制。
 - 只读 transcript 最后 2 MiB。回合未落盘、不在读取范围内、文件不可读、字段
-  缺失或不认识时，一律保留通知，不从全局配置或其他回合猜测。
+  缺失或不认识时保留通知（显式 null 的路径除外，见上节），不从全局配置或
+  其他回合猜测。
 - transcript 格式不是稳定接口，升级后可能恢复误报；其他 hook 直接批准也仍
   可能导致误报。自动审核拒绝后的用户沟通不属于这条审批通知链路。
 - 官方 app-server 有 `item/commandExecution/requestApproval` 等客户端审批协议，

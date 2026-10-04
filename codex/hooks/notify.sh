@@ -17,11 +17,19 @@ event=$(echo "$input" | jq -r '.hook_event_name // empty')
 cwd=$(echo "$input" | jq -r '.cwd // empty')
 project=$(basename "${cwd:-unknown}")
 
+# Desktop background suggestions use ephemeral sessions and explicitly send
+# transcript_path: null. This also covers user-created ephemeral sessions;
+# command hooks do not expose a reliable background-task source marker.
+# Missing/empty fields and unavailable files are not classified as transcript-less.
+without_transcript() {
+  printf '%s' "$input" | jq -e 'has("transcript_path") and .transcript_path == null' >/dev/null 2>&1
+}
+
 # PermissionRequest 不能直接等同于等待人工审批。hook 未提供 approvals_reviewer；
 # 用它给出的 transcript_path + turn_id 查本回合的 turn_context，不能读全局
 # config.toml（桌面端可逐会话切换模式）。只识别 Bash / apply_patch：应用和 MCP
 # 工具可能单独指定人工审核。transcript 不是稳定接口；缺字段、回合未落盘、
-# 格式变化等都返回 unknown，照常通知。
+# 格式变化等都返回 unknown；显式 null 的路径另按无记录通知开关处理。
 permission_reviewer() {
   local tool turn transcript
   tool=$(printf '%s' "$input" | jq -r '.tool_name // empty')
@@ -45,12 +53,8 @@ permission_reviewer() {
 
 case "$event" in
   Stop)
-    # Desktop background suggestions use ephemeral sessions and explicitly send
-    # transcript_path: null. Command hooks do not expose their task source, so
-    # classify this as a transcript-less stop, not as a confirmed background job.
-    # Missing/empty fields and unavailable files remain ordinary stops.
     kind=stop
-    if printf '%s' "$input" | jq -e 'has("transcript_path") and .transcript_path == null' >/dev/null 2>&1; then
+    if without_transcript; then
       kind=stop_without_transcript
     fi
     echo "$input" | jq -r '.last_assistant_message // ""' \
@@ -59,7 +63,11 @@ case "$event" in
   PermissionRequest)
     # 自动审核中的 shell / 文件修改不是用户待办；其他情况仍走统一通知内核。
     [ "$(permission_reviewer)" = "auto_review" ] && exit 0
-    printf '' | bash "$SEND" permission "$project" Codex
+    kind=permission
+    if without_transcript; then
+      kind=permission_without_transcript
+    fi
+    printf '' | bash "$SEND" "$kind" "$project" Codex
     ;;
 esac
 exit 0
