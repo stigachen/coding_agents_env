@@ -14,7 +14,7 @@
 #            同时决定按 agent 覆盖的开关前缀（见下）
 #
 # 各 agent 目录下的适配层只负责把自家事件格式翻译成这三个参数加正文；
-# 开关判定、消息措辞、前台静音、各渠道推送全部在这里，保证三家行为一致。
+# 开关判定、消息措辞、前台静音、各渠道推送全部在这里，由各 agent 共用。
 #
 # 配置文件：~/.config/coding_agents_env/notify.env（不入库，模板见同目录
 # notify.env.example）。找不到时回退旧位置 ~/.claude/notify.env。
@@ -32,7 +32,8 @@ body=$(cat)
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 CLAUDE_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
-ENV_FILE="${CODING_AGENTS_ENV_DIR:-$HOME/.config/coding_agents_env}/notify.env"
+CONFIG_DIR="${CODING_AGENTS_ENV_DIR:-$HOME/.config/coding_agents_env}"
+ENV_FILE="$CONFIG_DIR/notify.env"
 [ -f "$ENV_FILE" ] || ENV_FILE="$CLAUDE_DIR/notify.env"
 # 逐行加载 KEY=VALUE。环境变量 / 命令行前缀里已经设了的键优先于文件
 # （方便测试时临时覆盖：NOTIFY_SKIP_WHEN_FOCUSED=0 bash send.sh …）。
@@ -71,11 +72,6 @@ setting() {  # setting KEY DEFAULT
   fi
 }
 
-# xAI Grok CLI 会执行 Claude 的 hooks；默认忽略其事件（NOTIFY_FROM_GROK=0）
-if [ "$agent" = "Grok" ] && [ "$(setting NOTIFY_FROM_GROK 0)" != "1" ]; then
-  exit 0
-fi
-
 # 多台机器共用一个 IM 渠道时靠主机名区分来源：[项目@主机]
 tag="$project"
 if [ "$(setting NOTIFY_SHOW_HOST 1)" = "1" ]; then
@@ -111,8 +107,15 @@ esac
 
 # ---- 排障日志 ----
 dbg() {
-  [ "$(setting NOTIFY_DEBUG 0)" = "1" ] && \
-    printf '%s %s\n' "$(date '+%F %T')" "$*" >> "$CLAUDE_DIR/notify-debug.log"
+  if [ "$(setting NOTIFY_DEBUG 0)" = "1" ]; then
+    # Grok must also work on machines with no ~/.claude directory.
+    local debug_dir="$CLAUDE_DIR"
+    if [ "$agent" = "Grok" ]; then
+      debug_dir="$CONFIG_DIR"
+      mkdir -p "$debug_dir" 2>/dev/null || return 0
+    fi
+    printf '%s %s\n' "$(date '+%F %T')" "$*" >> "$debug_dir/notify-debug.log"
+  fi
   return 0
 }
 

@@ -1,7 +1,8 @@
 # coding_agents_env — my coding agent environments
 
 集中管理我对各个 coding agent 的环境定制——[Claude Code](https://docs.claude.com/en/docs/claude-code)、
-[Codex](https://developers.openai.com/codex)、[OpenCode](https://opencode.ai)——
+[Codex](https://developers.openai.com/codex)、[OpenCode](https://opencode.ai)、
+[Grok CLI](grok/README.md)——
 clone 到任何新开发机，一条命令（或一句提示词）完成部署。
 （仓库曾名 `cc_statusline`，最初只有 Claude Code 状态栏；后扩展为 `cc_dev_env`；
 接入 Codex / OpenCode 后改为现名。）
@@ -18,12 +19,13 @@ ctx ██████░░░░ 67% | session:3% weekly:9%
 
 | 目录 | 内容 | 文档 |
 |---|---|---|
-| `lib/` | 三家共用的通知内核：待审批 / 等待输入 / 任务完成时推送 Telegram / Discord / macOS 桌面通知；终端窗口聚焦时自动静音；所有开关在一个本机文件里，支持按 agent 覆盖 | [lib/README.md](lib/README.md) |
+| `lib/` | 各 agent 共用的通知内核：待审批 / 等待输入 / 任务完成时推送 Telegram / Discord / macOS 桌面通知；终端窗口聚焦时自动静音；所有开关在一个本机文件里，支持按 agent 覆盖 | [lib/README.md](lib/README.md) |
 | `claude/` | Claude Code：两行状态栏（模型/effort/git 分支 + context 进度条 + 订阅配额）、Notification/Stop hooks 适配层、settings.json 合并 | [statusline](claude/statusline/README.md) · [hooks](claude/hooks/README.md) |
 | `codex/` | Codex CLI：hooks.json 通知适配（含 hook 信任 hash 的自动写入）、`[tui] status_line` 配置片段 | [codex/README.md](codex/README.md) |
 | `opencode/` | OpenCode：通知插件（OpenCode 没有可配置的状态栏） | [opencode/README.md](opencode/README.md) |
+| `grok/` | Grok CLI：原生 Stop / Notification hooks，独立使用共用通知内核，无需安装 Claude Code | [grok/README.md](grok/README.md) |
 | `install.sh` | 一键部署：共用配置生成/迁移，再按本机装了哪些 agent 分发到各目录，幂等可重复执行 | — |
-| `AGENTS.md` | 让 agent 自己会装：描述部署流程与仓库约定（三家都读；`CLAUDE.md` 仅一行 `@AGENTS.md`） | — |
+| `AGENTS.md` | 让 agent 自己会装：描述部署流程与仓库约定（供各 agent 读取；`CLAUDE.md` 仅一行 `@AGENTS.md`） | — |
 
 ## 安装
 
@@ -32,7 +34,7 @@ ctx ██████░░░░ 67% | session:3% weekly:9%
 **方式一：让 agent 自己装（推荐）**
 
 ```bash
-git clone https://github.com/stigachen/coding_agents_env && cd coding_agents_env && claude   # 或 codex / opencode
+git clone https://github.com/stigachen/coding_agents_env && cd coding_agents_env && claude   # 或 codex / opencode / grok
 ```
 
 然后直接说：
@@ -47,17 +49,22 @@ agent 会按 `AGENTS.md` 里的流程执行 `install.sh`、做冒烟验证、并
 ```bash
 bash install.sh            # 自动检测本机装了哪些 agent
 bash install.sh claude     # 只装指定的
+bash install.sh grok       # 仅安装 Grok 原生通知，不依赖 Claude Code
 ```
 
 两种方式都是幂等的。安装后：
 
 1. 编辑 `~/.config/coding_agents_env/notify.env` 填入 Telegram bot token /
-   Discord webhook（IM 通知才会生效）。这一个文件三家共用
+   Discord webhook（IM 通知才会生效）。这一个文件各 agent 共用
 2. Claude Code 状态栏的订阅用量默认只显示 Claude Code 自己喂给它的 session/weekly；
    想额外看按模型的周配额，把 `notify.env` 里的 `CLAUDE_STATUSLINE_USAGE_API`
    改成 1（会用本机 OAuth token 调未公开的用量接口）。开启后 macOS 若弹出
    Keychain 授权，选 **Always Allow**；不授权也会自动回退读 `~/.claude/.credentials.json`
-3. 重启各 agent 会话；Claude Code 用 `/hooks` 确认 hooks 已注册
+3. Grok 通知继承公共 `NOTIFY_ON_*`，可用 `GROK_NOTIFY_ON_STOP` /
+   `GROK_NOTIFY_ON_PERMISSION` / `GROK_NOTIFY_ON_IDLE` 单独覆盖。旧兼容实现升级
+   需执行 `bash install.sh grok` 注册原生 hooks；未安装前不再通过 Claude 入口
+   通知，详见 [Grok 说明](grok/README.md)
+4. 重启各 agent 会话；Claude Code 用 `/hooks` 确认 hooks 已注册
 
 **依赖**：`bash` `curl` `git` `jq`（macOS: `brew install jq`；Windows Git Bash:
 把 `jq.exe` 放进 PATH）。支持 macOS / Windows (Git Bash) / Linux。
@@ -77,7 +84,7 @@ bash install.sh claude     # 只装指定的
   机器上其他工具写入的 hooks / 插件 / 设置一律保留。
 - **密钥不入库。** IM token 等放 `~/.config/coding_agents_env/notify.env`
   （每台机器各自填写），仓库里只有 `lib/notify.env.example` 模板。
-- **开关全在 notify.env，三家共用。** 部署一次后，各类通知的启停（待审批 /
+- **开关全在 notify.env，各 agent 共用。** 部署一次后，各类通知的启停（待审批 /
   等输入 / 回合结束 / 前台静音 / 桌面弹窗）和状态栏的用量接口开关都只改这一个
   文件，即时生效，不用碰各 agent 的配置、不用重装。需要区别对待某个 agent 时
   加前缀（`CODEX_NOTIFY_ON_STOP=0`）。重跑 `install.sh` 会自动补齐模板新增的开关。
