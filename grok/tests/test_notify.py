@@ -144,67 +144,79 @@ class NotifyTest(unittest.TestCase):
                                            notificationType="permission_prompt", **override)
                     self.assertIn("agent=Grok kind=" + kind + " ", output)
 
-    def test_new_total_switch_wins_over_legacy_switches(self):
-        for new, old in (("0", "1"), ("1", "0")):
-            with self.subTest(new=new, old=old):
-                self.config.write_text(
-                    "GROK_NOTIFY_ENABLED=" + new + "\n"
-                    "GROK_NOTIFY_FROM_GROK=" + old + "\nNOTIFY_FROM_GROK=" + old + "\n")
-                for event in ("Stop", "Notification"):
-                    with self.subTest(event=event):
-                        output = self.run_hook(hook_event_name=event,
-                                               notificationType="permission_prompt")
-                        if new == "1":
-                            self.assertIn("agent=Grok kind=", output)
+    def test_obsolete_grok_gates_in_config_are_ignored(self):
+        for key in ("GROK_NOTIFY_ENABLED", "GROK_NOTIFY_FROM_GROK", "NOTIFY_FROM_GROK"):
+            for value in ("0", "1", ""):
+                with self.subTest(key=key, value=value):
+                    self.config.write_text(key + "=" + value + "\n")
+                    self.assertIn("agent=Grok kind=stop ", self.run_hook())
+
+    def test_obsolete_grok_gates_in_environment_are_ignored_for_all_events(self):
+        for value in ("0", "1", ""):
+            environment = {key: value for key in (
+                "GROK_NOTIFY_ENABLED", "GROK_NOTIFY_FROM_GROK", "NOTIFY_FROM_GROK")}
+            for event, notification_type, kind in (
+                    ("Stop", "", "stop"),
+                    ("Notification", "permission_prompt", "permission"),
+                    ("Notification", "idle_prompt", "idle")):
+                with self.subTest(value=value, event=event, kind=kind):
+                    output = self.run_hook(hook_event_name=event, env=environment,
+                                           notificationType=notification_type)
+                    self.assertIn("agent=Grok kind=" + kind + " ", output)
+
+    def test_standard_event_switches_inherit_and_allow_grok_overrides(self):
+        for event, notification_type, key, kind in (
+                ("Stop", "", "NOTIFY_ON_STOP", "stop"),
+                ("Notification", "permission_prompt", "NOTIFY_ON_PERMISSION", "permission"),
+                ("Notification", "idle_prompt", "NOTIFY_ON_IDLE", "idle")):
+            for generic, scoped, enabled in (("0", None, False), ("1", None, True),
+                                             ("0", "1", True), ("1", "0", False)):
+                with self.subTest(key=key, generic=generic, scoped=scoped):
+                    settings = key + "=" + generic + "\n"
+                    if scoped is not None:
+                        settings += "GROK_" + key + "=" + scoped + "\n"
+                    self.config.write_text(settings)
+                    output = self.run_hook(hook_event_name=event, notificationType=notification_type)
+                    if enabled:
+                        self.assertIn("agent=Grok kind=" + kind + " ", output)
+                    else:
+                        self.assertEqual(output, "")
+
+    def test_standard_event_switch_environment_overrides_same_key_in_file(self):
+        for event, notification_type, key, kind in (
+                ("Stop", "", "NOTIFY_ON_STOP", "stop"),
+                ("Notification", "permission_prompt", "NOTIFY_ON_PERMISSION", "permission"),
+                ("Notification", "idle_prompt", "NOTIFY_ON_IDLE", "idle")):
+            for prefix in ("", "GROK_"):
+                for file_value, env_value in (("0", "1"), ("1", "0")):
+                    with self.subTest(key=prefix + key, file_value=file_value, env_value=env_value):
+                        self.config.write_text(prefix + key + "=" + file_value + "\n")
+                        output = self.run_hook(hook_event_name=event, notificationType=notification_type,
+                                               env={prefix + key: env_value})
+                        if env_value == "1":
+                            self.assertIn("agent=Grok kind=" + kind + " ", output)
                         else:
                             self.assertEqual(output, "")
 
-    def test_legacy_switches_remain_fallbacks_with_agent_precedence(self):
-        for settings, enabled in (
-                ("NOTIFY_FROM_GROK=0\n", False),
-                ("NOTIFY_FROM_GROK=1\n", True),
-                ("GROK_NOTIFY_FROM_GROK=0\nNOTIFY_FROM_GROK=1\n", False),
-                ("GROK_NOTIFY_FROM_GROK=1\nNOTIFY_FROM_GROK=0\n", True)):
-            with self.subTest(settings=settings):
-                self.config.write_text(settings)
-                output = self.run_hook()
-                if enabled:
-                    self.assertIn("agent=Grok kind=stop ", output)
-                else:
-                    self.assertEqual(output, "")
-
-    def test_new_total_switch_environment_overrides_file(self):
-        for file_value, env_value in (("0", "1"), ("1", "0")):
-            with self.subTest(file_value=file_value, env_value=env_value):
-                self.config.write_text("GROK_NOTIFY_ENABLED=" + file_value + "\n")
-                output = self.run_hook(env={"GROK_NOTIFY_ENABLED": env_value})
-                if env_value == "1":
-                    self.assertIn("agent=Grok kind=stop ", output)
-                else:
-                    self.assertEqual(output, "")
-
-    def test_event_switches_still_apply_to_grok(self):
-        for event, notification_type, key in (
-                ("Stop", "", "NOTIFY_ON_STOP"),
-                ("Notification", "permission_prompt", "NOTIFY_ON_PERMISSION"),
-                ("Notification", "idle_prompt", "NOTIFY_ON_IDLE")):
-            for prefix in ("", "GROK_"):
-                with self.subTest(event=event, key=prefix + key):
-                    self.config.write_text("GROK_NOTIFY_ENABLED=1\n" + prefix + key + "=0\n")
-                    self.assertEqual(self.run_hook(hook_event_name=event,
-                                                   notificationType=notification_type), "")
-
-    def test_claude_compatibility_hook_is_silent_for_grok(self):
+    def test_claude_compatibility_ignores_grok_with_or_without_native_hooks(self):
         self.config.write_text("GROK_NOTIFY_ENABLED=1\nNOTIFY_FROM_GROK=1\n")
-        for event, runner_event in (("Stop", "stop"), ("Notification", "notification")):
-            with self.subTest(event=event):
-                self.assertEqual(self.run_hook(
-                    hook=CLAUDE_HOOK, hook_event_name=event,
-                    notification_type="permission_prompt",
-                    env={"GROK_HOOK_EVENT": runner_event}), "")
+        native_hooks = self.home / ".grok/hooks/coding_agents_env.json"
+        for installed in (False, True):
+            if installed:
+                native_hooks.parent.mkdir(parents=True)
+                native_hooks.write_text(json.dumps({"hooks": {
+                    event: [{"hooks": [{"type": "command", "command": 'bash "' + str(HOOK) + '"'}]}]
+                    for event in ("Stop", "Notification")
+                }}))
+            for event, runner_event in (("Stop", "stop"), ("Notification", "notification")):
+                with self.subTest(installed=installed, event=event):
+                    self.assertEqual(self.run_hook(
+                        hook=CLAUDE_HOOK, hook_event_name=event,
+                        notification_type="permission_prompt",
+                        env={"GROK_HOOK_EVENT": runner_event}), "")
 
-    def test_normal_claude_notifications_are_unaffected_by_grok_switch(self):
-        self.config.write_text("GROK_NOTIFY_ENABLED=0\n")
+    def test_normal_claude_notifications_are_unaffected_by_grok_settings(self):
+        self.config.write_text("GROK_NOTIFY_ON_STOP=0\nGROK_NOTIFY_ON_PERMISSION=0\n")
         for event, kind in (("Stop", "stop"), ("Notification", "permission")):
             for environment in ({}, {"GROK_HOOK_EVENT": ""}):
                 with self.subTest(event=event, environment=environment):

@@ -31,9 +31,11 @@
      `config.toml.bak`）
    - Grok CLI：在 `${GROK_HOME:-$HOME/.grok}/hooks/coding_agents_env.json` 注册
      Stop / Notification hooks，直接指向仓库的 `grok/hooks/notify.sh`，无需 Claude。
-     不修改 Grok 的 `[compat.claude]`、第三方 hooks 或 Claude 配置。
-     `GROK_NOTIFY_ENABLED` 首次安装默认 1；已有新键优先，否则依次迁移旧
-     `GROK_NOTIFY_FROM_GROK`、`NOTIFY_FROM_GROK` 的值，旧值为 0 时保持关闭
+     不修改 Grok 的 `[compat.claude]`、第三方 hooks 或 Claude 配置。Grok 默认仍
+     合并 Claude 兼容 hooks，本仓库的 Claude 入口一律跳过 Grok 事件，无论原生
+     hooks 是否已安装；从旧实现升级需要运行 `bash install.sh grok`。通知使用
+     标准 `GROK_NOTIFY_ON_STOP` / `GROK_NOTIFY_ON_PERMISSION` / `GROK_NOTIFY_ON_IDLE`
+     覆盖公共 `NOTIFY_ON_*`，没有额外总开关
 2. **交互式收集通知渠道配置**。检查 `~/.config/coding_agents_env/notify.env`：
    若没有任何渠道键填了值，在对话中询问用户。判断命令（有输出即视为已配置，
    通用键和 `CLAUDE_` / `CODEX_` / `OPENCODE_` / `GROK_` 前缀键都算）：
@@ -113,7 +115,7 @@ jq 检查没有旧路径残留，以及 `~/.config/coding_agents_env/notify.env`
     走未公开接口，由 `notify.env` 的 `CLAUDE_STATUSLINE_USAGE_API` 控制，默认关）
   - `hooks/notify.sh` Notification / Stop 事件的适配层：把 Claude 的事件 JSON
     翻译成 `send.sh` 的参数。检测到非空 `GROK_HOOK_EVENT` 时直接退出，
-    Grok 改走自己的原生入口，避免兼容入口重复通知
+    不检测原生 hooks 是否已安装；Grok 只走自己的原生入口，避免重复通知
   - `install.sh` 合并 `~/.claude/settings.json`
 - `codex/` — Codex CLI：
   - `hooks/notify.sh` Stop / PermissionRequest 事件的适配层（Codex 没有 idle 事件）

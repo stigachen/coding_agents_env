@@ -60,9 +60,10 @@ bash install.sh grok       # 仅安装 Grok 原生通知，不依赖 Claude Code
    想额外看按模型的周配额，把 `notify.env` 里的 `CLAUDE_STATUSLINE_USAGE_API`
    改成 1（会用本机 OAuth token 调未公开的用量接口）。开启后 macOS 若弹出
    Keychain 授权，选 **Always Allow**；不授权也会自动回退读 `~/.claude/.credentials.json`
-3. Grok 首次安装默认启用通知；升级时会保留旧 `GROK_NOTIFY_FROM_GROK` /
-   `NOTIFY_FROM_GROK` 的值。旧值为 0 时仍关闭，要启用请将新键
-   `GROK_NOTIFY_ENABLED` 改为 1，详见 [Grok 配置](grok/README.md#配置与旧版迁移)
+3. Grok 通知继承公共 `NOTIFY_ON_*`，可用 `GROK_NOTIFY_ON_STOP` /
+   `GROK_NOTIFY_ON_PERMISSION` / `GROK_NOTIFY_ON_IDLE` 单独覆盖。旧兼容实现升级
+   需执行 `bash install.sh grok` 注册原生 hooks；未安装前不再通过 Claude 入口
+   通知，详见 [Grok 说明](grok/README.md)
 4. 重启各 agent 会话；Claude Code 用 `/hooks` 确认 hooks 已注册
 
 **依赖**：`bash` `curl` `git` `jq`（macOS: `brew install jq`；Windows Git Bash:

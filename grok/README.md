@@ -3,8 +3,8 @@
 ## 通知：`hooks/notify.sh`
 
 使用 Grok 原生的 `Stop` / `Notification` hooks，直接调用
-[`lib/send.sh`](../lib/README.md)。无需安装 Claude Code，也不读取 Claude 的
-hook 配置。适配层只翻译事件；开关、文案、前台静音和 Telegram / Discord /
+[`lib/send.sh`](../lib/README.md)。无需安装 Claude Code。适配层只翻译事件；
+开关、文案、前台静音和 Telegram / Discord /
 macOS 桌面推送都由共用内核处理。
 
 | Grok 事件 | `send.sh` kind | 说明 |
@@ -34,43 +34,37 @@ bash install.sh         # 自动检测已安装的 agent，包括 Grok
 
 **从旧 Claude 兼容实现升级必须执行 `bash install.sh grok`。** 新版 Claude
 入口会直接跳过 Grok 事件，所以只 git pull、尚未注册原生 hooks 的这段时间，
-Grok 通知会暂停；完成原生安装后再按原有开关发送。
+Grok 通知会暂停；完成原生安装后按标准 `GROK_NOTIFY_ON_*` / `NOTIFY_ON_*` 发送。
 
 入口脚本生成 / 迁移 / 补齐共用的 `notify.env`，随后 `grok/install.sh` 在
 `${GROK_HOME:-$HOME/.grok}/hooks/coding_agents_env.json` 注册 `Stop` 和
 `Notification`。命令引用仓库里 `grok/hooks/notify.sh` 的绝对路径，代码不拷贝；
 仓库移动后重跑安装，通常的脚本更新随 git pull 生效。
 
-只管理本仓库的 hook 条目，不动其他 hook 文件、第三方条目或 Grok 全局
-`[compat.claude]` 配置。Claude 适配层看到非空 `GROK_HOOK_EVENT` 就退出，
-避免 Grok 同时从原生和 Claude 兼容入口发送本仓库的通知。其他 Claude 兼容
-hooks 继续按用户原配置工作。
+Grok 会合并原生、Claude 兼容等来源的 hooks；**注册原生 hooks 后，默认仍
+扫描 Claude 配置**。安装器只管理本仓库条目，不动其他 hook 文件、第三方条目
+或 Grok 全局 `[compat.claude]` 配置。本仓库的 Claude 适配层看到非空
+`GROK_HOOK_EVENT` 就直接退出，无论是否已注册原生 hooks，也不做安装状态检测。
+这样只跳过本仓库自己的兼容事件；其他 Claude 兼容 hooks 继续按用户原配置工作。
 
 脚本兼容 macOS 自带 Bash 3.2 与 Windows Git Bash；依赖 `bash`、`jq`、
 `curl`、`git`，与仓库其他模块一致。
 
-## 配置与旧版迁移
+## 配置
 
 密钥和开关仍只放在 `~/.config/coding_agents_env/notify.env`（chmod 600），
 不写入 Grok hook JSON 或仓库。可用 `CODING_AGENTS_ENV_DIR` 指定共用配置目录。
 
-- `GROK_NOTIFY_ENABLED=1`：Grok 通知总开关，新安装默认开启。
 - `GROK_NOTIFY_ON_STOP`、`GROK_NOTIFY_ON_PERMISSION`、`GROK_NOTIFY_ON_IDLE`：
   分别控制回合结束、待审批、等输入；未设置时继承公共 `NOTIFY_ON_*`。
 - 渠道、桌面通知、前台静音等同样支持 `GROK_` 覆盖，例如
   `GROK_DISCORD_WEBHOOK_URL`、`GROK_DESKTOP_NOTIFY`、`GROK_NOTIFY_SKIP_WHEN_FOCUSED`。
   Telegram token / chat_id 需成对覆盖，规则见 [共用内核](../lib/README.md)。
 
-旧版通过 Claude 兼容 hook 发送 Grok 通知，使用 `NOTIFY_FROM_GROK` 或
-`GROK_NOTIFY_FROM_GROK`。现在使用独立的原生入口，安装器按以下优先级保留设置：
-
-```text
-GROK_NOTIFY_ENABLED → GROK_NOTIFY_FROM_GROK → NOTIFY_FROM_GROK → 默认 1
-```
-
-已有新键就不覆盖；没有新键时用第一个存在的旧键值生成。运行时未找到新键也
-按此顺序回退。因此旧配置为 `NOTIFY_FROM_GROK=0` 的机器升级后仍关闭，若要
-开启需主动将 `GROK_NOTIFY_ENABLED` 改为 1。改开关下次事件即生效，无需重装。
+原生通知没有额外总开关，只使用上述标准开关。遗留的 `NOTIFY_FROM_GROK` /
+`GROK_NOTIFY_FROM_GROK` 不再参与通知判断，即使值为 0 也不抑制原生通知；
+安装器不生成、迁移或删除这些旧键，用户文件里的旧键可自行清理。改标准开关
+下次事件即生效，无需重装。
 
 `GROK_NOTIFY_DEBUG=1`（或公共 `NOTIFY_DEBUG=1`）时，Grok 的日志写入
 `${CODING_AGENTS_ENV_DIR:-$HOME/.config/coding_agents_env}/notify-debug.log`，
@@ -89,15 +83,15 @@ Grok 的 `Stop` 是停止前的 gate。若其他 Stop hook 阻止停止、要求
 
 ## 隔离 dry-run
 
-以下命令在仓库根目录执行，只用临时配置，明确开启 Grok 测试开关；不修改本机
-配置、不读取本机 IM 凭据，也不会真发通知。前四条分别输出主会话 stop /
+以下命令在仓库根目录执行，只用临时配置和默认标准开关；不修改本机配置、
+不读取本机 IM 凭据，也不会真发通知。前四条分别输出主会话 stop /
 permission / idle、子 agent permission，最后四条应无输出：
 
 ```bash
 grok_test_dir=$(mktemp -d)
 printf 'NOTIFY_DEBUG=0\n' > "$grok_test_dir/notify.env"
 env -i PATH="$PATH" CODING_AGENTS_ENV_DIR="$grok_test_dir" \
-  CLAUDE_CONFIG_DIR="$grok_test_dir" GROK_NOTIFY_ENABLED=1 \
+  CLAUDE_CONFIG_DIR="$grok_test_dir" \
   NOTIFY_DRY_RUN=1 NOTIFY_SKIP_WHEN_FOCUSED=0 bash <<'GROK_TEST'
   printf '%s' '{"hook_event_name":"Stop","cwd":"/tmp/demo","reason":"end_turn","lastAssistantMessage":"测试摘要"}' | bash grok/hooks/notify.sh
   printf '%s' '{"hook_event_name":"Notification","cwd":"/tmp/demo","notificationType":"permission_prompt"}' | bash grok/hooks/notify.sh

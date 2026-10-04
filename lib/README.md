@@ -63,7 +63,6 @@ hook 配置里不设 matcher 过滤，事件先到 `send.sh` 再按开关决定�
 | `DESKTOP_NOTIFY` | 0 | macOS 本机桌面弹窗 |
 | `NOTIFY_SHOW_HOST` | 1 | 消息前缀带主机名 `[项目@主机]` |
 | `NOTIFY_DEBUG` | 0 | 排障日志；Grok 写入共用配置目录的 `notify-debug.log`，其他 agent 保留 `~/.claude/notify-debug.log` |
-| `GROK_NOTIFY_ENABLED` | 1 | Grok 原生通知总开关；升级时保留旧开关值，见下文和 [Grok 说明](../grok/README.md) |
 | `CLAUDE_STATUSLINE_USAGE_API` | 0 | （Claude 状态栏用）设 1 后额外显示按模型的周配额，详见 [claude/statusline/README.md](../claude/statusline/README.md) |
 
 **临时覆盖**：环境变量或命令行前缀里已设的键优先于文件，测试时可以
@@ -82,11 +81,9 @@ Telegram（`NOTIFY_DEBUG=1` 时日志里有提示）。Grok 同样使用这套�
 `GROK_NOTIFY_ON_STOP=0`、`GROK_DESKTOP_NOTIFY=1`、`GROK_DISCORD_WEBHOOK_URL=…`；
 未提供 Grok 专属值时继承公共设置。
 
-**Grok 总开关迁移**：`GROK_NOTIFY_ENABLED` 优先；没有新键时，依次读取旧
-`GROK_NOTIFY_FROM_GROK`、`NOTIFY_FROM_GROK`，都没有时默认 1。安装器按这个顺序
-补齐新键，保留用户原值，所以旧配置中的 0 不会被升级自动开启。新安装默认启用。
-该总开关由通知内核处理，其他 agent 不受影响；Grok 原生入口和 Claude 兼容入口
-的分工见 [Grok 说明](../grok/README.md)。
+Grok 没有额外总开关，三类通知分别使用 `GROK_NOTIFY_ON_STOP`、
+`GROK_NOTIFY_ON_PERMISSION`、`GROK_NOTIFY_ON_IDLE`，未设置时继承公共开关。
+原生入口与 Claude 兼容入口的分工、旧版升级说明见 [Grok 说明](../grok/README.md)。
 
 `stop` 每个回合都触发，包括你在旁边正常交互的短回合。嫌吵可设
 `NOTIFY_ON_STOP=0`，只保留"待审批 / 等输入"两类通知 ——

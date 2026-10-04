@@ -71,7 +71,7 @@ elif [ -f "$LEGACY_ENV" ] && [ ! -L "$LEGACY_ENV" ]; then
 fi
 
 # 改名过的键：旧键有值、新键缺失时，用旧值生成新键（不用模板默认值覆盖用户设置）
-RENAMED_KEYS="STATUSLINE_USAGE_API:CLAUDE_STATUSLINE_USAGE_API GROK_NOTIFY_FROM_GROK:GROK_NOTIFY_ENABLED NOTIFY_FROM_GROK:GROK_NOTIFY_ENABLED"
+RENAMED_KEYS="STATUSLINE_USAGE_API:CLAUDE_STATUSLINE_USAGE_API"
 for pair in $RENAMED_KEYS; do
   old=${pair%%:*}; new=${pair##*:}
   if grep -q "^${old}=" "$ENV_FILE" && ! grep -q "^${new}=" "$ENV_FILE"; then

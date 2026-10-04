@@ -150,10 +150,11 @@ class InstallTest(unittest.TestCase):
                 self.run_install(success=False)
                 self.assertEqual(self.hooks.read_bytes(), invalid)
 
-    def test_root_installer_supports_explicit_grok_and_new_default(self):
+    def test_root_installer_supports_explicit_grok_without_extra_gates(self):
         self.run_install(root=True)
         self.assert_native_hooks()
-        self.assertIn("GROK_NOTIFY_ENABLED=1", self.config.read_text().splitlines())
+        keys = {line.partition("=")[0] for line in self.config.read_text().splitlines()}
+        self.assertTrue(keys.isdisjoint({"GROK_NOTIFY_ENABLED", "GROK_NOTIFY_FROM_GROK", "NOTIFY_FROM_GROK"}))
         self.assertEqual(self.config.stat().st_mode & 0o777, 0o600)
         self.assertFalse((self.home / ".claude").exists())
         self.assertFalse((self.home / ".codex").exists())
@@ -172,26 +173,32 @@ class InstallTest(unittest.TestCase):
         self.assert_native_hooks()
         self.assertFalse(marker.exists())
 
-    def test_root_installer_migrates_legacy_switches_without_changing_existing_choice(self):
-        for settings, expected in (
-                ("NOTIFY_FROM_GROK=0\n", "0"),
-                ("NOTIFY_FROM_GROK=1\n", "1"),
-                ("GROK_NOTIFY_FROM_GROK=0\nNOTIFY_FROM_GROK=1\n", "0"),
-                ("GROK_NOTIFY_FROM_GROK=1\nNOTIFY_FROM_GROK=0\n", "1"),
-                ("GROK_NOTIFY_ENABLED=1\nGROK_NOTIFY_FROM_GROK=0\nNOTIFY_FROM_GROK=0\n", "1"),
-                ("GROK_NOTIFY_ENABLED=0\nGROK_NOTIFY_FROM_GROK=1\nNOTIFY_FROM_GROK=1\n", "0")):
-            with self.subTest(settings=settings):
-                sentinel = "DISCORD_WEBHOOK_URL=https://example.invalid/test-only\n"
-                self.write_config(settings + sentinel)
-                self.run_install(root=True)
-                contents = self.config.read_text()
-                actual = [line for line in contents.splitlines() if line.startswith("GROK_NOTIFY_ENABLED=")]
-                self.assertEqual(actual, ["GROK_NOTIFY_ENABLED=" + expected])
-                self.assertIn(sentinel, contents)
-                for old_line in settings.splitlines():
-                    self.assertIn(old_line, contents.splitlines())
-                self.run_install(root=True)
-                self.assertEqual(self.config.read_text(), contents)
+    def test_obsolete_keys_are_preserved_without_creating_or_migrating_gates(self):
+        obsolete = {"GROK_NOTIFY_ENABLED", "GROK_NOTIFY_FROM_GROK", "NOTIFY_FROM_GROK"}
+        for key in sorted(obsolete):
+            for value in ("0", "1", ""):
+                with self.subTest(key=key, value=value):
+                    old_line = key + "=" + value
+                    sentinel = "DISCORD_WEBHOOK_URL=https://example.invalid/test-only\n"
+                    self.write_config(old_line + "\n" + sentinel)
+                    self.run_install(root=True)
+                    contents = self.config.read_text()
+                    actual = [line for line in contents.splitlines() if line.partition("=")[0] in obsolete]
+                    self.assertEqual(actual, [old_line])
+                    self.assertIn(sentinel, contents)
+                    for line in contents.splitlines():
+                        if line.startswith("GROK_NOTIFY_ON_"):
+                            self.assertNotEqual(line.partition("=")[2], "0", line)
+                    self.run_install(root=True)
+                    self.assertEqual(self.config.read_text(), contents)
+
+    def test_existing_grok_event_overrides_are_preserved(self):
+        settings = "NOTIFY_FROM_GROK=0\nGROK_NOTIFY_ON_STOP=1\nGROK_NOTIFY_ON_IDLE=0\n"
+        self.write_config(settings)
+        self.run_install(root=True)
+        lines = self.config.read_text().splitlines()
+        for line in settings.splitlines():
+            self.assertEqual(lines.count(line), 1)
 
 
 if __name__ == "__main__":

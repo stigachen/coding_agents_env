@@ -72,15 +72,6 @@ setting() {  # setting KEY DEFAULT
   fi
 }
 
-# Grok has its own native hooks. Keep the old compatibility-era switch as a
-# fallback until install.sh migrates it; an explicit new setting always wins.
-if [ "$agent" = "Grok" ]; then
-  if is_set GROK_NOTIFY_ENABLED; then grok_enabled=$GROK_NOTIFY_ENABLED
-  else grok_enabled=$(setting NOTIFY_FROM_GROK 1)
-  fi
-  [ "$grok_enabled" = "1" ] || exit 0
-fi
-
 # 多台机器共用一个 IM 渠道时靠主机名区分来源：[项目@主机]
 tag="$project"
 if [ "$(setting NOTIFY_SHOW_HOST 1)" = "1" ]; then
