@@ -1,5 +1,33 @@
 # grok — Grok CLI
 
+## 状态栏：`statusline/statusline.sh`
+
+两行自定义状态栏，挂在 `${GROK_HOME:-$HOME/.grok}/config.toml` 的
+`[ui.status_line]` 上，`type = "command"`，命令指向仓库里的脚本。
+Grok 把一份 JSON 写到脚本的 stdin，脚本把 stdout 画到底部。缺字段就省略，
+不显示占位符，也不把未知费用当成 `$0`。
+
+```
+Grok 4.7 (effort:high) | coding_agents_env | git:main@linked
+ctx ████░░░░░░ 42% | $1.23
+```
+
+第一行是模型、`effort.level`、当前目录名、`workspace.branch`。链接 worktree
+还有名字时写成 `git:分支@名字`；只有 worktree 名、没有分支时写成 `wt:名字`。
+分支直接用 payload，不调用 `git`：回合进行中 Grok 会连续重跑这个脚本。
+
+第二行是 context 进度条和本会话费用。`used_percentage` 为 0 会显示；字段缺失
+则整段隐藏。颜色低于 60% 为绿，60% 到自动压缩阈值前为黄，达到
+`auto_compact_threshold_percent`（没有则 80）起为红。费用低于 $0.005 或缺失
+时不显示。
+
+不显示订阅配额、脏文件数、回合计时、会话名和 Grok 版本。stdin 里没有配额，
+也不去打未公开接口。不设置 `refresh_interval`；用户自己写的 `padding` 和
+`refresh_interval` 重装时保留。脚本改动下次刷新即生效。`config.toml` 这一段
+在启动时读取，安装或改表之后要重启 Grok。
+
+细节和冒烟命令见 [statusline/README.md](statusline/README.md)。
+
 ## 通知：`hooks/notify.sh`
 
 使用 Grok 原生的 `Stop` / `Notification` hooks，直接调用
@@ -36,10 +64,20 @@ bash install.sh         # 自动检测已安装的 agent，包括 Grok
 入口会直接跳过 Grok 事件，所以只 git pull、尚未注册原生 hooks 的这段时间，
 Grok 通知会暂停；完成原生安装后按标准 `GROK_NOTIFY_ON_*` / `NOTIFY_ON_*` 发送。
 
-入口脚本生成 / 迁移 / 补齐共用的 `notify.env`，随后 `grok/install.sh` 在
-`${GROK_HOME:-$HOME/.grok}/hooks/coding_agents_env.json` 注册 `Stop` 和
-`Notification`。命令引用仓库里 `grok/hooks/notify.sh` 的绝对路径，代码不拷贝；
-仓库移动后重跑安装，通常的脚本更新随 git pull 生效。
+入口脚本生成 / 迁移 / 补齐共用的 `notify.env`，随后 `grok/install.sh` 做两件事：
+
+- 在 `${GROK_HOME:-$HOME/.grok}/hooks/coding_agents_env.json` 注册 `Stop` 和
+  `Notification`，命令引用仓库里 `grok/hooks/notify.sh` 的绝对路径
+- 在同一目录的 `config.toml` 写入 `[ui.status_line]` 的 `type` 和 `command`，
+  指向 `grok/statusline/statusline.sh`。按 TOML 结构合并，能识别带空格或引号的
+  表头、引号键、inline table、点号键和多行字符串；字符串里的假表头不会被改写。
+  根级 `ui = { ... }` 在这张 inline table 里写入 `status_line`，不在文件末尾追加子表。
+  其他表和键保留。原来的 command 不是本仓库脚本时，会在 stderr 提示已接管。
+  认不出或无法安全改写时安装失败，原文件保持不动。`config.toml` 是软链时改目标文件，
+  成功改写前把目标复制为旁边的 `config.toml.bak`（每次安装覆盖上一份备份）
+
+代码不拷贝。仓库移动后重跑安装；通常的脚本更新随 git pull 生效。状态栏表在
+下次启动 Grok 时加载。
 
 Grok 会合并原生、Claude 兼容等来源的 hooks；**注册原生 hooks 后，默认仍
 扫描 Claude 配置**。安装器只管理本仓库条目，不动其他 hook 文件、第三方条目

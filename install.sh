@@ -10,6 +10,7 @@
 #        codex/     → ~/.codex/hooks.json + config.toml 的 [tui] status_line
 #        opencode/  → ~/.config/opencode/plugins/ 的通知插件
 #        grok/      → ~/.grok/hooks/coding_agents_env.json 的原生通知 hooks
+#                     + config.toml 的 [ui.status_line]
 #      也可只装指定的：bash install.sh claude
 #
 # 原则：只增删本仓库自己的条目（按脚本路径特征识别），机器上已有的其他工具

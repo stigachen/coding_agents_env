@@ -23,7 +23,7 @@ ctx ██████░░░░ 67% | session:3% weekly:9%
 | `claude/` | Claude Code：两行状态栏（模型/effort/git 分支 + context 进度条 + 订阅配额）、Notification/Stop hooks 适配层、settings.json 合并 | [statusline](claude/statusline/README.md) · [hooks](claude/hooks/README.md) |
 | `codex/` | Codex CLI：hooks.json 通知适配（含 hook 信任 hash 的自动写入）、`[tui] status_line` 配置片段 | [codex/README.md](codex/README.md) |
 | `opencode/` | OpenCode：通知插件（OpenCode 没有可配置的状态栏） | [opencode/README.md](opencode/README.md) |
-| `grok/` | Grok CLI：原生 Stop / Notification hooks，独立使用共用通知内核，无需安装 Claude Code | [grok/README.md](grok/README.md) |
+| `grok/` | Grok CLI：两行自定义状态栏（模型/effort/目录/分支/context/费用）、原生 Stop / Notification hooks | [grok/README.md](grok/README.md) |
 | `install.sh` | 一键部署：共用配置生成/迁移，再按本机装了哪些 agent 分发到各目录，幂等可重复执行 | — |
 | `AGENTS.md` | 让 agent 自己会装：描述部署流程与仓库约定（供各 agent 读取；`CLAUDE.md` 仅一行 `@AGENTS.md`） | — |
 
@@ -49,7 +49,7 @@ agent 会按 `AGENTS.md` 里的流程执行 `install.sh`、做冒烟验证、并
 ```bash
 bash install.sh            # 自动检测本机装了哪些 agent
 bash install.sh claude     # 只装指定的
-bash install.sh grok       # 仅安装 Grok 原生通知，不依赖 Claude Code
+bash install.sh grok       # Grok 原生通知和自定义状态栏，不依赖 Claude Code
 ```
 
 两种方式都是幂等的。安装后：
@@ -62,8 +62,9 @@ bash install.sh grok       # 仅安装 Grok 原生通知，不依赖 Claude Code
    Keychain 授权，选 **Always Allow**；不授权也会自动回退读 `~/.claude/.credentials.json`
 3. Grok 通知继承公共 `NOTIFY_ON_*`，可用 `GROK_NOTIFY_ON_STOP` /
    `GROK_NOTIFY_ON_PERMISSION` / `GROK_NOTIFY_ON_IDLE` 单独覆盖。旧兼容实现升级
-   需执行 `bash install.sh grok` 注册原生 hooks；未安装前不再通过 Claude 入口
-   通知，详见 [Grok 说明](grok/README.md)
+   需执行 `bash install.sh grok` 注册原生 hooks 和 `[ui.status_line]`；未安装前
+   不再通过 Claude 入口通知，详见 [Grok 说明](grok/README.md)。状态栏在下次启动
+   Grok 时加载
 4. 重启各 agent 会话；Claude Code 用 `/hooks` 确认 hooks 已注册
 
 **依赖**：`bash` `curl` `git` `jq`（macOS: `brew install jq`；Windows Git Bash:
