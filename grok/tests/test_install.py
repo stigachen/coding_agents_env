@@ -1,7 +1,9 @@
 """Run installers against copied sources and temporary homes; never invoke an agent."""
 
 import json
+import os
 from pathlib import Path
+import re
 import shlex
 import shutil
 import subprocess
@@ -199,6 +201,142 @@ class InstallTest(unittest.TestCase):
         lines = self.config.read_text().splitlines()
         for line in settings.splitlines():
             self.assertEqual(lines.count(line), 1)
+
+    def toml_basic_unescape(self, value):
+        out = []
+        index = 0
+        while index < len(value):
+            if value[index] == "\\" and index + 1 < len(value):
+                out.append(value[index + 1])
+                index += 2
+            else:
+                out.append(value[index])
+                index += 1
+        return "".join(out)
+
+    def status_command(self, text):
+        found = []
+        for line in text.splitlines():
+            match = re.match(r'^command = "(.*)"$', line)
+            if match and "statusline.sh" in match.group(1):
+                found.append(self.toml_basic_unescape(match.group(1)))
+        self.assertEqual(len(found), 1, text)
+        return found[0]
+
+    def assert_status_command_runs(self, text):
+        rendered = subprocess.run(
+            ["/bin/bash", "-c", self.status_command(text)],
+            input='{"model":{"display_name":"Grok 4.7"}}\n',
+            text=True, capture_output=True, timeout=10,
+            env={**os.environ, "HOME": str(self.home)},
+        )
+        self.assertEqual(rendered.returncode, 0, rendered.stderr)
+        self.assertIn("Grok 4.7", rendered.stdout)
+
+    def test_missing_config_gets_statusline_without_backup(self):
+        result = self.run_install()
+        self.assertNotIn("接管", result.stderr)
+        config = self.grok_home / "config.toml"
+        text = config.read_text()
+        self.assertTrue(text.startswith("[ui.status_line]\n"))
+        self.assertEqual(text.count('type = "command"'), 1)
+        self.assertIn("/grok/statusline/statusline.sh", text)
+        self.assertFalse(config.with_name("config.toml.bak").exists())
+        again = self.run_install()
+        self.assertNotIn("接管", again.stderr)
+        self.assertEqual(config.read_text(), text)
+
+    def test_statusline_preserves_other_tables_mode_and_runs(self):
+        self.grok_home.mkdir()
+        config = self.grok_home / "config.toml"
+        original = (
+            "[ui]\n"
+            "max_thoughts_width = 120\n"
+            "type = \"keep-ui\"\n"
+            "\n"
+            "[mcp_servers.rea]\n"
+            "command = \"keep\"\n"
+        )
+        config.write_text(original)
+        config.chmod(0o640)
+        result = self.run_install()
+        self.assertNotIn("接管", result.stderr)
+        text = config.read_text()
+        self.assertIn("max_thoughts_width = 120\n", text)
+        self.assertIn('type = "keep-ui"\n', text)
+        self.assertIn('command = "keep"\n', text)
+        self.assertEqual(text.count("[ui.status_line]"), 1)
+        self.assertEqual(text.count('type = "command"'), 1)
+        self.assertEqual(config.stat().st_mode & 0o777, 0o640)
+        self.assertEqual(config.with_name("config.toml.bak").read_text(), original)
+        self.assert_status_command_runs(text)
+        again = self.run_install()
+        self.assertNotIn("接管", again.stderr)
+        self.assertEqual(config.read_text(), text)
+
+    def test_statusline_follows_relative_symlink_chain(self):
+        actual = self.home / "actual.toml"
+        actual.write_text("[ui]\nmax_thoughts_width = 120\n")
+        actual.chmod(0o604)
+        mid = self.home / "mid.toml"
+        mid.symlink_to("actual.toml")
+        self.grok_home.mkdir()
+        link = self.grok_home / "config.toml"
+        link.symlink_to("../mid.toml")
+        self.run_install()
+        self.assertTrue(link.is_symlink())
+        self.assertTrue(mid.is_symlink())
+        text = actual.read_text()
+        self.assertIn("max_thoughts_width = 120", text)
+        self.assertIn("[ui.status_line]", text)
+        self.assert_status_command_runs(text)
+        self.assertEqual(actual.stat().st_mode & 0o777, 0o604)
+        self.assertEqual((self.home / "actual.toml.bak").read_text(), "[ui]\nmax_thoughts_width = 120\n")
+        self.assertFalse((self.grok_home / "config.toml.bak").exists())
+
+    def test_statusline_takes_over_foreign_command_and_keeps_other_keys(self):
+        self.grok_home.mkdir()
+        config = self.grok_home / "config.toml"
+        config.write_bytes(
+            "[ui]\r\nyolo = false\r\n\r\n"
+            "[ui.status_line]\r\n"
+            "# user note\r\n"
+            "items = [\"cwd\", \"model\"]\r\n"
+            "padding = 2\r\n"
+            "type = \"builtin\"\r\n"
+            "refresh_interval = 30\r\n"
+            "command = \"~/.grok/other.sh\"\r\n"
+            "\r\n"
+            "[mcp]\r\n"
+            "enabled = true\r\n".encode()
+        )
+        result = self.run_install()
+        self.assertIn("接管", result.stderr)
+        text = config.read_bytes()
+        self.assertIn(b"[ui]\r\nyolo = false\r\n", text)
+        self.assertIn(b"[mcp]\r\nenabled = true\r\n", text)
+        self.assertIn(b"# user note\r\n", text)
+        self.assertIn(b"items = [\"cwd\", \"model\"]\r\n", text)
+        self.assertIn(b"padding = 2\r\n", text)
+        self.assertIn(b"refresh_interval = 30\r\n", text)
+        self.assertNotIn(b"builtin", text)
+        self.assertNotIn(b"other.sh", text)
+        self.assertEqual(text.count(b"[ui.status_line]"), 1)
+        self.assertEqual(text.count(b'type = "command"'), 1)
+        self.assertEqual(text.count(b"/grok/statusline/statusline.sh"), 1)
+        header = text.split(b"[ui.status_line]\r\n", 1)[1]
+        self.assertTrue(header.startswith(b'type = "command"\r\ncommand = "'))
+        again = self.run_install()
+        self.assertNotIn("接管", again.stderr)
+        self.assertEqual(config.read_bytes(), text)
+
+    def test_dangling_config_symlink_is_not_replaced(self):
+        self.grok_home.mkdir()
+        link = self.grok_home / "config.toml"
+        link.symlink_to(self.root / "missing.toml")
+        self.run_install(success=False)
+        self.assertTrue(link.is_symlink())
+        self.assertFalse((self.root / "missing.toml").exists())
 
 
 if __name__ == "__main__":

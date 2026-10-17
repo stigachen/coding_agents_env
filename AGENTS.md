@@ -31,11 +31,14 @@
      `config.toml.bak`）
    - Grok CLI：在 `${GROK_HOME:-$HOME/.grok}/hooks/coding_agents_env.json` 注册
      Stop / Notification hooks，直接指向仓库的 `grok/hooks/notify.sh`，无需 Claude。
-     不修改 Grok 的 `[compat.claude]`、第三方 hooks 或 Claude 配置。Grok 默认仍
-     合并 Claude 兼容 hooks，本仓库的 Claude 入口一律跳过 Grok 事件，无论原生
-     hooks 是否已安装；从旧实现升级需要运行 `bash install.sh grok`。通知使用
-     标准 `GROK_NOTIFY_ON_STOP` / `GROK_NOTIFY_ON_PERMISSION` / `GROK_NOTIFY_ON_IDLE`
-     覆盖公共 `NOTIFY_ON_*`，没有额外总开关
+     同时在 `config.toml` 写入 `[ui.status_line]` 的 `type` 和 `command`，指向
+     `grok/statusline/statusline.sh`；其他表和键保留，软链改目标并先备份为
+     `config.toml.bak`。不修改 Grok 的 `[compat.claude]`、第三方 hooks 或 Claude
+     配置。Grok 默认仍合并 Claude 兼容 hooks，本仓库的 Claude 入口一律跳过 Grok
+     事件，无论原生 hooks 是否已安装；从旧实现升级需要运行 `bash install.sh grok`。
+     通知使用标准 `GROK_NOTIFY_ON_STOP` / `GROK_NOTIFY_ON_PERMISSION` /
+     `GROK_NOTIFY_ON_IDLE` 覆盖公共 `NOTIFY_ON_*`，没有额外总开关。状态栏表在
+     下次启动 Grok 时加载
 2. **交互式收集通知渠道配置**。检查 `~/.config/coding_agents_env/notify.env`：
    若没有任何渠道键填了值，在对话中询问用户。判断命令（有输出即视为已配置，
    通用键和 `CLAUDE_` / `CODEX_` / `OPENCODE_` / `GROK_` 前缀键都算）：
@@ -77,9 +80,12 @@
      `agent=OpenCode kind=stop` 一行
    - 装了 Grok 的机器：`jq . "${GROK_HOME:-$HOME/.grok}/hooks/coding_agents_env.json"`
      合法且含指向本仓库 `grok/hooks/notify.sh` 的 Stop / Notification 条目。
+     `grep grok/statusline/statusline.sh "${GROK_HOME:-$HOME/.grok}/config.toml"`
+     能看到状态栏命令。状态栏冒烟：
+     `echo '{"model":{"display_name":"Test"},"effort":{"level":"high"},"workspace":{"current_dir":"'$HOME'","branch":"main"},"context_window":{"used_percentage":42},"cost":{"total_cost_usd":1.23}}' | bash grok/statusline/statusline.sh`
      按 `grok/README.md` 的隔离 dry-run 检查 `end_turn`、`permission_prompt`、
      `idle_prompt`，包括子 agent 待审批仍通知、子 agent Stop / idle 和退出会话
-     不通知；不必真发或改本机通知开关
+     不通知；不必真发或改本机通知开关。状态栏配置要重启 Grok 才加载
 4. 提醒用户：
    - 状态栏用量默认只显示 Claude Code 喂给 stdin 的 session/weekly；想看按模型的
      周配额需把 `notify.env` 的 `CLAUDE_STATUSLINE_USAGE_API` 设 1（用本机 OAuth
@@ -127,11 +133,14 @@ jq 检查没有旧路径残留，以及 `~/.config/coding_agents_env/notify.env`
   - `install.sh` 在 OpenCode 插件目录生成一行转发文件指向仓库。OpenCode 没有可
     配置的状态栏。细节见 opencode/README.md
 - `grok/` — Grok CLI：
+  - `statusline/statusline.sh` 两行状态栏：模型/effort/目录/git 分支（链接
+    worktree 带名字）+ context 进度条 + 本会话费用。不读配额、不调用 git
   - `hooks/notify.sh` 原生适配层：主会话 `Stop` 仅接受 `reason=end_turn`，
     Notification 只接收 `permission_prompt` / `idle_prompt`；子 agent 待审批
     仍通知，只忽略其 Stop / idle。忽略会话退出、`task_complete` 和未知类型；
     不依赖 Claude Code
-  - `install.sh` 在 Grok 全局 hooks 目录注册本仓库条目。开关和渠道由 `lib/send.sh`
+  - `install.sh` 在 Grok 全局 hooks 目录注册本仓库条目，并合并
+    `[ui.status_line]` 的 `type` / `command`。开关和渠道由 `lib/send.sh`
     统一处理；Grok 调试日志写入共用配置目录下的 `notify-debug.log`。
     Stop gate 的重复触发限制及隔离测试见 grok/README.md
 
