@@ -569,6 +569,117 @@ exit 0
         self.assertNotIn("接管", again.stderr)
         self.assertEqual(config.read_text(), text)
 
+    def hide_python(self):
+        python = self.bin / "python3"
+        if python.exists() or python.is_symlink():
+            python.unlink()
+        self.assertFalse(python.exists())
+
+    def test_root_inline_ui_merges_without_python(self):
+        self.hide_python()
+        cases = {
+            "foreign-status": (
+                'ui = { yolo = false, status_line = { type = "builtin", padding = 2, extra = { a = 1 } } }\n'
+                '\n'
+                '[mcp]\n'
+                'enabled = true\n',
+                True,
+            ),
+            "insert-status": ('ui = { yolo = false } # keep\n', False),
+            "quoted-ui": ('"ui" = { yolo = false }\n', False),
+            "dotted-inside": (
+                'ui = { yolo = false, status_line.type = "builtin", '
+                'status_line.command = "echo hello", status_line.padding = 2 }\n',
+                True,
+            ),
+            "multiline": (
+                'ui = {\n'
+                '  yolo = false,\n'
+                '  status_line = { type = "builtin", padding = 2 }\n'
+                '}\n',
+                True,
+            ),
+            "key-after-status": (
+                'ui = { yolo = false, status_line = { padding = 2 }, theme = "dark" }\n',
+                True,
+            ),
+        }
+        for name, (contents, takeover) in cases.items():
+            with self.subTest(shape=name):
+                config = self.write_grok_config(contents)
+                result = self.run_install()
+                if takeover:
+                    self.assertIn("接管", result.stderr)
+                else:
+                    self.assertNotIn("接管", result.stderr)
+                text = config.read_text()
+                headers = [line for line in text.splitlines() if line.strip() == "[ui.status_line]"]
+                self.assertEqual(headers, [])
+                self.assertNotIn("builtin", text)
+                self.assertNotIn("echo hello", text)
+                data = self.assert_status_table(config)
+                self.assertIs(data["ui"]["yolo"], False)
+                if name == "foreign-status":
+                    self.assertEqual(data["ui"]["status_line"]["padding"], 2)
+                    self.assertEqual(data["ui"]["status_line"]["extra"]["a"], 1)
+                    self.assertEqual(data["mcp"]["enabled"], True)
+                if name == "insert-status":
+                    self.assertIn("# keep", text)
+                if name == "dotted-inside":
+                    self.assertEqual(data["ui"]["status_line"]["padding"], 2)
+                if name == "key-after-status":
+                    self.assertEqual(data["ui"]["status_line"]["padding"], 2)
+                    self.assertEqual(data["ui"]["theme"], "dark")
+                self.assertEqual(config.stat().st_mode & 0o777, 0o640)
+                again = self.run_install()
+                self.assertNotIn("接管", again.stderr)
+                self.assertEqual(config.read_text(), text)
+
+    def test_non_inline_ui_still_appends_without_python(self):
+        self.hide_python()
+        cases = {
+            "dotted-parent": "ui.yolo = false\n",
+            "standard-table": "[ui]\nyolo = false\n",
+            "nested-dotted": "ui.ui = { yolo = false }\n",
+            "subtable": '[ui.theme]\nname = "dark"\n',
+        }
+        for name, contents in cases.items():
+            with self.subTest(shape=name):
+                config = self.write_grok_config(contents)
+                result = self.run_install()
+                self.assertNotIn("接管", result.stderr)
+                self.assertIn("[ui.status_line]", config.read_text())
+                data = self.load_toml(config)
+                status = data["ui"]["status_line"]
+                self.assertEqual(status["type"], "command")
+                self.assertIn("/grok/statusline/statusline.sh", status["command"])
+                if name == "nested-dotted":
+                    self.assertIs(data["ui"]["ui"]["yolo"], False)
+                elif name == "subtable":
+                    self.assertEqual(data["ui"]["theme"]["name"], "dark")
+                else:
+                    self.assertIs(data["ui"]["yolo"], False)
+
+    def test_root_ui_unsafe_shapes_leave_the_file_unchanged_without_python(self):
+        self.hide_python()
+        samples = {
+            "string": 'ui = "nope"\n',
+            "array": "ui = [1]\n",
+            "status-string": 'ui = { status_line = "nope" }\n',
+            "comment": "ui = { yolo = false # keep\n}\n",
+            "mixed": 'ui = { status_line = { padding = 1 }, status_line.type = "builtin" }\n',
+            "dotted-then-inline": "ui.yolo = false\nui = { padding = 1 }\n",
+            "inline-then-subtable": 'ui = { yolo = false }\n\n[ui.theme]\nname = "dark"\n',
+            "duplicate-inline": "ui = { yolo = false }\nui = { padding = 1 }\n",
+        }
+        for name, contents in samples.items():
+            with self.subTest(shape=name):
+                config = self.write_grok_config(contents)
+                original = config.read_bytes()
+                result = self.run_install(success=False)
+                self.assertIn("原文件未修改", result.stderr)
+                self.assert_config_unchanged(config, original)
+
     def test_unsafe_status_line_shapes_leave_the_file_unchanged(self):
         samples = {
             "array-of-tables": "[[ui.status_line]]\ntype = \"command\"\n",

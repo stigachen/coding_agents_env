@@ -1,7 +1,9 @@
 # Merge this repo's [ui.status_line] type and command into a TOML file.
 # Recognizes spaced or quoted headers, quoted keys, inline tables, dotted keys,
-# and multiline strings. Strings are opaque. On input this script cannot merge
-# safely it exits 2 and prints nothing, so the caller can keep the original.
+# and multiline strings. A root inline table ui = { ... } is rewritten in place;
+# appending [ui.status_line] after it is illegal. Strings are opaque. On input
+# this script cannot merge safely it exits 2 and prints nothing, so the caller
+# can keep the original.
 # STATUSLINE_TOML is the command already escaped for a TOML basic string.
 # POSIX awk (macOS nawk and Git Bash). LC_ALL=C keeps this byte-oriented.
 
@@ -20,10 +22,16 @@ BEGIN {
   saw_type = 0
   saw_command = 0
   sl_defined = ""
+  sl_existed = 0
   header_insert_line = 0
   dotted_prefix = ""
   dotted_anchor = 0
   np = 0
+  ni = 0
+  strict_inline = 0
+  root_ui_inline = 0
+  root_ui_dotted = 0
+  ui_header = 0
 }
 
 function fail(msg) {
@@ -69,7 +77,11 @@ function skip_gap(    c) {
     c = ch()
     if (c == "") return
     if (c == " " || c == "\t" || c == "\n") { adv(); continue }
-    if (c == "#") { skip_comment(); continue }
+    if (c == "#") {
+      if (strict_inline) fail("inline table 含有注释，为避免丢掉注释已停止")
+      skip_comment()
+      continue
+    }
     return
   }
 }
@@ -267,7 +279,7 @@ function skip_inline(record,    c) {
     if (c == "") return
     if (c == " " || c == "\t" || c == "\n") { adv(); continue }
     if (c == "#") {
-      if (record) fail("inline table 形式的 status_line 含有注释，为避免丢掉注释已停止")
+      if (record || strict_inline) fail("inline table 含有注释，为避免丢掉注释已停止")
       skip_comment()
       continue
     }
@@ -286,10 +298,12 @@ function parse_value(capture,    sL, sC, c) {
   if (capture) val_raw = slice(sL, sC, L, C)
 }
 
-function parse_inline(record,    sc, sr) {
+function parse_inline(record,    sc, sr, capture) {
   if (ch() != "{") fail("缺少 inline table")
   adv()
-  if (record) np = 0
+  if (record == 1) np = 0
+  else if (record == 2) ni = 0
+  capture = (record == 1 || record == 2)
   while (1) {
     skip_inline(record)
     if (ch() == "") fail("未闭合 inline table")
@@ -301,12 +315,17 @@ function parse_inline(record,    sc, sr) {
     if (ch() != "=") fail("inline table 缺少等号")
     adv()
     skip_inline(record)
-    parse_value(record)
-    if (record) {
+    parse_value(capture)
+    if (record == 1) {
       np++
       Pcanon[np] = sc
       Pkey[np] = sr
       Pval[np] = val_raw
+    } else if (record == 2) {
+      ni++
+      Icanon[ni] = sc
+      Ikey[ni] = sr
+      Ival[ni] = val_raw
     }
     skip_inline(record)
     if (ch() == ",") { adv(); continue }
@@ -402,6 +421,112 @@ function rebuild_inline(    i, out) {
   return out
 }
 
+function append_piece(out, piece) {
+  if (out == "{") return out " " piece
+  return out ", " piece
+}
+
+function rebuild_inner_sl(    i, out) {
+  out = "{ type = \"command\", command = \"" cmd "\""
+  for (i = 1; i <= ni; i++) {
+    if (Icanon[i] == "command") note_command_raw(Ival[i])
+    if (Icanon[i] == "type" || Icanon[i] == "command") continue
+    if (index(Icanon[i], "type\034") == 1 || index(Icanon[i], "command\034") == 1)
+      fail("ui.status_line 里混用了 type 或 command 的写法")
+    out = out ", " Ikey[i] " = " Ival[i]
+  }
+  return out " }"
+}
+
+# Root `ui = { ... }` is closed, so a later [ui.status_line] header is illegal.
+# Rewrite the inline table instead. A new status_line does not count as a takeover.
+function parse_root_ui_value(    sc, sr) {
+  if (ch() != "{") fail("缺少 inline table")
+  adv()
+  np = 0
+  strict_inline = 1
+  while (1) {
+    skip_inline(1)
+    if (ch() == "") fail("未闭合 inline table")
+    if (ch() == "}") { adv(); strict_inline = 0; return }
+    parse_key(1)
+    sc = key_canon
+    sr = key_raw
+    skip_inline(1)
+    if (ch() != "=") fail("inline table 缺少等号")
+    adv()
+    skip_inline(1)
+    np++
+    Pcanon[np] = sc
+    Pkey[np] = sr
+    if (sc == "status_line") {
+      if (ch() != "{") fail("ui.status_line 的值不是 inline table")
+      parse_inline(2)
+      Psl[np] = 1
+      Pval[np] = ""
+    } else {
+      parse_value(1)
+      Psl[np] = 0
+      Pval[np] = val_raw
+    }
+    skip_inline(1)
+    if (ch() == ",") { adv(); continue }
+    if (ch() == "}") { adv(); strict_inline = 0; return }
+    fail("inline table 语法无法识别")
+  }
+}
+
+function rebuild_root_ui(    i, out, piece, saw_inline, saw_dotted, ntype, ncmd, rest) {
+  out = "{"
+  saw_inline = 0
+  saw_dotted = 0
+  ntype = 0
+  ncmd = 0
+  for (i = 1; i <= np; i++) {
+    if (Pcanon[i] == "status_line") {
+      if (!Psl[i]) fail("ui.status_line 的值不是 inline table")
+      saw_inline++
+    } else if (index(Pcanon[i], "status_line\034") == 1) {
+      saw_dotted++
+    }
+  }
+  if (saw_inline > 1) fail("inline ui 里重复定义了 status_line")
+  if (saw_inline && saw_dotted) fail("inline ui 里混用了 status_line 写法")
+  for (i = 1; i <= np; i++) {
+    if (Pcanon[i] == "status_line") {
+      sl_existed = 1
+      piece = rebuild_inner_sl()
+      out = append_piece(out, "status_line = " piece)
+    } else if (index(Pcanon[i], "status_line\034") == 1) {
+      sl_existed = 1
+      rest = substr(Pcanon[i], length("status_line") + 2)
+      if (index(rest, "\034") == 0 && rest == "type") {
+        ntype++
+        if (ntype > 1) fail("inline ui 里重复定义了 status_line")
+        out = append_piece(out, Pkey[i] " = \"command\"")
+      } else if (index(rest, "\034") == 0 && rest == "command") {
+        ncmd++
+        if (ncmd > 1) fail("inline ui 里重复定义了 status_line")
+        note_command_raw(Pval[i])
+        out = append_piece(out, Pkey[i] " = \"" cmd "\"")
+      } else {
+        out = append_piece(out, Pkey[i] " = " Pval[i])
+      }
+    } else {
+      out = append_piece(out, Pkey[i] " = " Pval[i])
+    }
+  }
+  if (saw_dotted) {
+    if (!ntype) out = append_piece(out, "status_line.type = \"command\"")
+    if (!ncmd) out = append_piece(out, "status_line.command = \"" cmd "\"")
+  }
+  if (!saw_inline && !saw_dotted) {
+    piece = "{ type = \"command\", command = \"" cmd "\" }"
+    out = append_piece(out, "status_line = " piece)
+  }
+  return out " }"
+}
+
 function parse_header(    is_arr, path, header_end) {
   adv()
   is_arr = 0
@@ -423,8 +548,13 @@ function parse_header(    is_arr, path, header_end) {
     if (is_arr) fail("不支持 [[ui.status_line]]")
     if (sl_defined == "header") fail("重复的 [ui.status_line]")
     note_form("header")
+    sl_existed = 1
     header_insert_line = header_end
   }
+  if (root_ui_inline && (path == "ui" || index(path, "ui\034") == 1))
+    fail("根级 inline ui 不能再声明子表")
+  if (path == "ui" || index(path, "ui\034") == 1)
+    ui_header = 1
   set_cur(path)
 }
 
@@ -442,9 +572,32 @@ function parse_keyval(    start_line, start_col, kv_indent, kv_key_raw, path, vL
   skip_gap()
   if (ch() == "") fail("缺少值")
 
+  # A dotted `ui.*` at root defines table ui. Do not also accept `ui = { ... }`.
+  if (cur == "" && index(path, "ui\034") == 1) {
+    if (root_ui_inline) fail("根级 inline ui 不能再使用点号键扩展")
+    root_ui_dotted = 1
+  }
+
+  if (path == "ui") {
+    if (ch() != "{") fail("根级 ui 不是 inline table，无法写入 status_line")
+    if (ui_header || root_ui_dotted) fail("根级 ui 已有其他定义，无法按 inline table 合并")
+    if (root_ui_inline) fail("重复的根级 ui")
+    root_ui_inline = 1
+    note_form("inline")
+    vL = L
+    vC = C
+    parse_root_ui_value()
+    endL = L
+    endC = C
+    schedule_replace(start_line, vL, vC, endL, endC, rebuild_root_ui(), kv_indent, kv_key_raw)
+    finish_statement()
+    return
+  }
+
   if (path == SL) {
     if (ch() != "{") fail("status_line 的值不是 inline table")
     note_form("inline")
+    sl_existed = 1
     vL = L
     vC = C
     parse_inline(1)
@@ -457,6 +610,7 @@ function parse_keyval(    start_line, start_col, kv_indent, kv_key_raw, path, vL
 
   if (!inside_sl() && index(path, SL "\034") == 1) {
     note_form("dotted")
+    sl_existed = 1
     prefix = sl_rel_prefix()
     vL = L
     vC = C
@@ -523,7 +677,7 @@ function finish_edits(    block) {
     if (!saw_command) block = block dotted_prefix ".command = \"" cmd "\"\n"
     insert_after[dotted_anchor] = insert_after[dotted_anchor] block
   }
-  if (sl_defined != "" && !ours)
+  if (sl_existed && !ours)
     print "ℹ️  config.toml [ui.status_line] 原有配置已被仓库的 command 状态栏接管" > "/dev/stderr"
 }
 
