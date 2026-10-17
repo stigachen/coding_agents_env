@@ -2,8 +2,9 @@
 # Register native Grok hooks and this repo's status line.
 # Hooks: only our handlers in our own JSON file are replaced; other files,
 # handlers and Grok's compatibility settings are retained.
-# Status line: only [ui.status_line] type and command are replaced. Every
-# other config.toml table and key is kept. A symlink is edited at its target.
+# Status line: merge [ui.status_line] type and command by TOML structure.
+# Other tables and keys are kept. If the file cannot be merged safely, it is
+# left unchanged and the installer fails. A symlink is edited at its target.
 
 set -euo pipefail
 
@@ -93,6 +94,72 @@ jq --arg notify "$NOTIFY_CMD" '
 ' "$tmp" > "$tmp.merged"
 mv "$tmp.merged" "$HOOKS"
 
+# Keep only a successful stat. GNU `stat -f` is --file-system: it can print
+# filesystem text and still exit non-zero, so `$(stat -f || stat -c)` would
+# glue that text onto the mode. Each attempt is captured on its own.
+# GNU `stat -c %a` is tried first; BSD `stat -f %OLp` is the fallback.
+read_mode() {
+  local path=$1 out
+  if out=$(stat -c '%a' "$path" 2>/dev/null); then
+    :
+  elif out=$(stat -f '%OLp' "$path" 2>/dev/null); then
+    :
+  else
+    return 1
+  fi
+  out=$(printf '%s' "$out" | tr -d '[:space:]')
+  case $out in
+    [0-7][0-7][0-7]|[0-7][0-7][0-7][0-7]) printf '%s' "$out" ;;
+    *) return 1 ;;
+  esac
+}
+
+# When python3 has tomllib, refuse to publish a merge that does not parse or
+# does not point at this repo's status line. Older Python skips the check.
+# Exit 1 means the file is not TOML; exit 2 means the status line is missing.
+toml_check() {
+  local file=$1
+  command -v python3 >/dev/null 2>&1 || return 0
+  python3 - "$file" <<'PY'
+import sys
+try:
+    import tomllib
+except ImportError:
+    sys.exit(0)
+try:
+    with open(sys.argv[1], "rb") as fh:
+        data = tomllib.load(fh)
+except tomllib.TOMLDecodeError:
+    sys.exit(1)
+ui = data.get("ui")
+status = ui.get("status_line") if isinstance(ui, dict) else None
+if not isinstance(status, dict):
+    sys.exit(2)
+command = status.get("command")
+if status.get("type") != "command" or not isinstance(command, str):
+    sys.exit(2)
+if "/grok/statusline/statusline.sh" not in command:
+    sys.exit(2)
+PY
+}
+
+require_toml() {
+  local file=$1 created=$2 status=0
+  toml_check "$file" || status=$?
+  if [ "$status" -eq 0 ]; then
+    return 0
+  fi
+  if [ "$created" -eq 1 ]; then
+    rm -f "$file"
+  fi
+  if [ "$status" -eq 1 ]; then
+    echo "Grok config.toml 合并结果不是合法 TOML，原文件未修改" >&2
+  else
+    echo "Grok config.toml 合并结果没有写入本仓库的状态栏，原文件未修改" >&2
+  fi
+  exit 1
+}
+
 install_statusline() {
   local config mode
   if [ -e "$CONFIG_LINK" ] || [ -L "$CONFIG_LINK" ]; then
@@ -116,56 +183,25 @@ install_statusline() {
       'type = "command"' \
       "command = \"${STATUSLINE_TOML}\"" \
       > "$config"
+    require_toml "$config" 1
     return
   fi
 
-  # %OLp is "octal, user/group/other only" on BSD stat. GNU stat uses -c %a.
-  mode=$(stat -f '%OLp' "$config" 2>/dev/null || stat -c '%a' "$config" 2>/dev/null || true)
-  cp "$config" "$config.bak"
+  mode=$(read_mode "$config") || {
+    echo "Grok config.toml 无法读取权限，原文件未修改" >&2
+    exit 1
+  }
   sl_tmp=$(mktemp "$(dirname "$config")/.config.toml.XXXXXX")
-  awk '
-BEGIN { cmd = ENVIRON["STATUSLINE_TOML"]; seen = 0; ours = 0; in_sl = 0; use_cr = 0; last = "" }
-function stripped(s) { sub(/\r$/, "", s); return s }
-function emit_new(cr) {
-  printf "%s%s\n", "type = \"command\"", cr
-  printf "%s%s\n", "command = \"" cmd "\"", cr
-}
-{
-  raw = $0
-  cr = ""
-  if (raw ~ /\r$/) { use_cr = 1; cr = "\r" }
-  l = stripped(raw)
-  last = l
-  if (l ~ /^[ \t]*\[[ \t]*ui\.status_line[ \t]*\][ \t]*(#.*)?$/) {
-    seen = 1
-    in_sl = 1
-    print raw
-    emit_new(cr)
-    next
-  }
-  if (l ~ /^[ \t]*\[/) in_sl = 0
-  if (in_sl && l ~ /^[ \t]*(type|command)[ \t]*=/) {
-    if (l ~ /^[ \t]*command[ \t]*=/ && index(l, "/grok/statusline/statusline.sh") > 0) ours = 1
-    next
-  }
-  print raw
-}
-END {
-  end_cr = use_cr ? "\r" : ""
-  if (!seen) {
-    if (NR > 0 && last != "") printf "%s\n", end_cr
-    printf "%s%s\n", "[ui.status_line]", end_cr
-    emit_new(end_cr)
-  } else if (!ours) {
-    print "ℹ️  config.toml [ui.status_line] 原有配置已被仓库的 command 状态栏接管" > "/dev/stderr"
-  }
-}
-' "$config" > "$sl_tmp"
+  # LC_ALL=C makes awk scan bytes, so a multibyte string cannot hide a quote.
+  if ! LC_ALL=C awk -f "$REPO_DIR/grok/statusline/merge_config.awk" "$config" > "$sl_tmp"; then
+    exit 1
+  fi
+  require_toml "$sl_tmp" 0
+  # Set the mode before rename. A failed chmod then leaves the original in place.
+  chmod "$mode" "$sl_tmp"
+  cp "$config" "$config.bak"
   mv "$sl_tmp" "$config"
   sl_tmp=""
-  if [ -n "$mode" ]; then
-    chmod "$mode" "$config"
-  fi
 }
 
 install_statusline

@@ -28,7 +28,8 @@ class InstallTest(unittest.TestCase):
         # Keep real coding agents out of PATH, including during automatic detection.
         for name in ("bash", "jq", "curl", "chmod", "dirname", "basename", "printenv", "mkdir", "tr", "grep",
                      "sed", "tail", "head", "mktemp", "mv", "rm", "uname", "ln", "cat",
-                     "cp", "stat", "awk", "sort", "cut", "readlink", "realpath", "date"):
+                     "cp", "stat", "awk", "sort", "cut", "readlink", "realpath", "date",
+                     "python3"):
             executable = shutil.which(name)
             if executable:
                 (self.bin / name).symlink_to(executable)
@@ -105,7 +106,13 @@ class InstallTest(unittest.TestCase):
         uname.chmod(0o755)
         cygpath = self.bin / "cygpath"
         cygpath.write_text(
-            "#!/bin/sh\nprintf '%s\\n' \"C:/Users/O'Brien/project/grok/hooks/notify.sh\"\n")
+            "#!/bin/sh\n"
+            "path=\n"
+            "for arg in \"$@\"; do path=$arg; done\n"
+            "case $path in\n"
+            "  *statusline.sh) printf '%s\\n' \"C:/Users/O'Brien/project/grok/statusline/statusline.sh\" ;;\n"
+            "  *) printf '%s\\n' \"C:/Users/O'Brien/project/grok/hooks/notify.sh\" ;;\n"
+            "esac\n")
         cygpath.chmod(0o755)
         self.run_install()
         data = json.loads(self.hooks.read_text())
@@ -337,6 +344,245 @@ class InstallTest(unittest.TestCase):
         self.run_install(success=False)
         self.assertTrue(link.is_symlink())
         self.assertFalse((self.root / "missing.toml").exists())
+
+    def write_grok_config(self, contents, mode=0o640):
+        self.grok_home.mkdir(exist_ok=True)
+        config = self.grok_home / "config.toml"
+        data = contents.encode() if isinstance(contents, str) else contents
+        config.write_bytes(data)
+        config.chmod(mode)
+        return config
+
+    def load_toml(self, path):
+        import tomllib
+        return tomllib.loads(path.read_bytes().decode())
+
+    def assert_status_table(self, path):
+        data = self.load_toml(path)
+        status = data["ui"]["status_line"]
+        self.assertEqual(status["type"], "command")
+        self.assertIn("/grok/statusline/statusline.sh", status["command"])
+        self.assertEqual(list(status).count("type"), 1)
+        self.assertEqual(list(status).count("command"), 1)
+        return data
+
+    def assert_config_unchanged(self, config, original, mode=0o640):
+        self.assertEqual(config.read_bytes(), original)
+        self.assertEqual(config.stat().st_mode & 0o777, mode)
+        self.assertFalse(config.with_name("config.toml.bak").exists())
+
+    def replace_stat(self, script):
+        stub = self.bin / "stat"
+        stub.unlink()
+        stub.write_text(script)
+        stub.chmod(0o755)
+
+    def test_gnu_stat_failure_text_is_not_used_as_the_mode(self):
+        # GNU `stat -f` prints filesystem info and exits non-zero. A combined
+        # `$(stat -f || stat -c)` would feed that text to chmod.
+        original = "[ui]\nyolo = false\n"
+        gnu = """#!/bin/sh
+if [ "$1" = "-c" ]; then
+  printf '%s\\n' 640
+  exit 0
+fi
+printf '  File: "%s"\\n    ID: deadbeef Namelen: 255\\n' "$3"
+echo "stat: cannot statx '$2': No such file or directory" >&2
+exit 1
+"""
+        fallback = """#!/bin/sh
+if [ "$1" = "-c" ]; then
+  printf '  File: "junk"\\n640\\n'
+  exit 1
+fi
+printf '%s\\n' 640
+exit 0
+"""
+        for name, script in (("gnu", gnu), ("bsd-fallback", fallback)):
+            with self.subTest(stat=name):
+                config = self.write_grok_config(original)
+                self.replace_stat(script)
+                result = self.run_install()
+                self.assertNotIn("无法读取权限", result.stderr)
+                self.assertEqual(config.stat().st_mode & 0o777, 0o640)
+                self.assert_status_table(config)
+                self.assertEqual(self.load_toml(config)["ui"]["yolo"], False)
+                self.assertEqual(config.with_name("config.toml.bak").read_text(), original)
+
+    def test_multiline_command_and_decoy_header_stay_valid(self):
+        config = self.write_grok_config(
+            'note = """\n'
+            '[ui.status_line]\n'
+            'type = "stolen"\n'
+            '"""\n'
+            'title = "say \\"[ui.status_line]\\" ok"\n'
+            '\n'
+            '[mcp]\n'
+            'enabled = true\n'
+            '\n'
+            '[ui.status_line]\n'
+            'type = "command"\n'
+            'command = """\n'
+            'bash ~/.grok/old-status.sh\n'
+            '"""\n'
+            'padding = 2\n'
+        )
+        result = self.run_install()
+        self.assertIn("接管", result.stderr)
+        text = config.read_text()
+        self.assertNotIn("old-status.sh", text)
+        command_line = next(line for line in text.splitlines() if line.startswith("command = "))
+        self.assertTrue(command_line.startswith('command = "') and command_line.endswith('"'))
+        self.assertNotIn('"""', command_line)
+        self.assertIn('note = """\n[ui.status_line]\ntype = "stolen"\n"""\n', text)
+        data = self.assert_status_table(config)
+        self.assertEqual(data["ui"]["status_line"]["padding"], 2)
+        self.assertEqual(data["note"], '[ui.status_line]\ntype = "stolen"\n')
+        self.assertEqual(data["title"], 'say "[ui.status_line]" ok')
+        self.assertEqual(data["mcp"]["enabled"], True)
+        headers = [line for line in text.splitlines() if line.strip() == "[ui.status_line]"]
+        self.assertEqual(headers, ["[ui.status_line]", "[ui.status_line]"])
+        again = self.run_install()
+        self.assertNotIn("接管", again.stderr)
+        self.assertEqual(config.read_text(), text)
+
+    def test_spaced_header_and_quoted_keys_are_updated_in_place(self):
+        config = self.write_grok_config(
+            '[ ui . status_line ]\n'
+            '"type" = "builtin"\n'
+            '\'command\' = "echo hello"\n'
+            'padding = 2\n'
+        )
+        result = self.run_install()
+        self.assertIn("接管", result.stderr)
+        text = config.read_text()
+        self.assertEqual(text.count("status_line"), 1)
+        self.assertNotIn("builtin", text)
+        self.assertNotIn("echo hello", text)
+        self.assertNotIn('"type"', text)
+        data = self.assert_status_table(config)
+        self.assertEqual(data["ui"]["status_line"]["padding"], 2)
+        again = self.run_install()
+        self.assertNotIn("接管", again.stderr)
+        self.assertEqual(config.read_text(), text)
+
+    def test_quoted_table_header_is_the_same_table(self):
+        config = self.write_grok_config(
+            "[ \"ui\" . 'status_line' ]\n"
+            "padding = 2\n"
+        )
+        result = self.run_install()
+        self.assertIn("接管", result.stderr)
+        text = config.read_text()
+        self.assertEqual(text.count("status_line"), 1)
+        data = self.assert_status_table(config)
+        self.assertEqual(data["ui"]["status_line"]["padding"], 2)
+        again = self.run_install()
+        self.assertNotIn("接管", again.stderr)
+        self.assertEqual(config.read_text(), text)
+
+    def test_inline_status_line_keeps_other_keys(self):
+        original_ui = {"max_thoughts_width": 120, "yolo": False}
+        config = self.write_grok_config(
+            "[ui]\n"
+            "max_thoughts_width = 120\n"
+            "yolo = false\n"
+            'status_line = { type = "command", command = "echo hello", padding = 2 }\n'
+        )
+        result = self.run_install()
+        self.assertIn("接管", result.stderr)
+        text = config.read_text()
+        self.assertNotIn("[ui.status_line]", text)
+        self.assertNotIn("echo hello", text)
+        data = self.assert_status_table(config)
+        self.assertEqual(data["ui"]["max_thoughts_width"], original_ui["max_thoughts_width"])
+        self.assertEqual(data["ui"]["yolo"], original_ui["yolo"])
+        self.assertEqual(data["ui"]["status_line"]["padding"], 2)
+        again = self.run_install()
+        self.assertNotIn("接管", again.stderr)
+        self.assertEqual(config.read_text(), text)
+
+    def test_dotted_status_line_keys_are_updated_without_a_second_table(self):
+        config = self.write_grok_config(
+            "[ui]\n"
+            "yolo = false\n"
+            "status_line.padding = 2\n"
+            'status_line.type = "builtin"\n'
+            'status_line.command = """\n'
+            "echo hello\n"
+            '"""\n'
+            "theme = \"dark\"\n"
+        )
+        result = self.run_install()
+        self.assertIn("接管", result.stderr)
+        text = config.read_text()
+        self.assertNotIn("[ui.status_line]", text)
+        self.assertNotIn("echo hello", text)
+        self.assertNotIn('"""', text)
+        data = self.assert_status_table(config)
+        self.assertEqual(data["ui"]["yolo"], False)
+        self.assertEqual(data["ui"]["theme"], "dark")
+        self.assertEqual(data["ui"]["status_line"]["padding"], 2)
+        again = self.run_install()
+        self.assertNotIn("接管", again.stderr)
+        self.assertEqual(config.read_text(), text)
+
+    def test_real_config_shape_appends_status_line_without_rewriting_arrays(self):
+        original = (
+            "[cli]\n"
+            "installer = \"test\"\n"
+            "\n"
+            "[[marketplace.sources]]\n"
+            "name = \"official\"\n"
+            "git = \"https://example.invalid/repo.git\"\n"
+            "\n"
+            "[ui]\n"
+            "max_thoughts_width = 120\n"
+            "yolo = false\n"
+            "\n"
+            "[mcp_servers.rea]\n"
+            "command = \"keep\"\n"
+            "args = [\n"
+            "  \"-y\",\n"
+            "  \"rea-agents@6.5.0\",\n"
+            "  \"mcp\",\n"
+            "]\n"
+            "\n"
+            "[mcp_servers.rea.env]\n"
+            "HOPPER_LAUNCHER_PATH = \"/tmp/hopper\"\n"
+        )
+        config = self.write_grok_config(original)
+        before = self.load_toml(config)
+        result = self.run_install()
+        self.assertNotIn("接管", result.stderr)
+        data = self.assert_status_table(config)
+        before_ui = dict(before["ui"])
+        after_ui = dict(data["ui"])
+        after_ui.pop("status_line")
+        self.assertEqual(after_ui, before_ui)
+        self.assertEqual(data["mcp_servers"]["rea"]["command"], "keep")
+        self.assertEqual(data["mcp_servers"]["rea"]["args"], ["-y", "rea-agents@6.5.0", "mcp"])
+        self.assertEqual(data["mcp_servers"]["rea"]["env"]["HOPPER_LAUNCHER_PATH"], "/tmp/hopper")
+        self.assertEqual(data["marketplace"]["sources"][0]["name"], "official")
+        text = config.read_text()
+        again = self.run_install()
+        self.assertNotIn("接管", again.stderr)
+        self.assertEqual(config.read_text(), text)
+
+    def test_unsafe_status_line_shapes_leave_the_file_unchanged(self):
+        samples = {
+            "array-of-tables": "[[ui.status_line]]\ntype = \"command\"\n",
+            "string-value": "[ui]\nstatus_line = \"nope\"\n",
+            "inline-comment": "[ui]\nstatus_line = { type = \"builtin\", padding = 2 # keep\n}\n",
+            "unclosed-string": "title = \"oops\n",
+        }
+        for name, contents in samples.items():
+            with self.subTest(shape=name):
+                config = self.write_grok_config(contents)
+                original = config.read_bytes()
+                result = self.run_install(success=False)
+                self.assertIn("原文件未修改", result.stderr)
+                self.assert_config_unchanged(config, original)
 
 
 if __name__ == "__main__":

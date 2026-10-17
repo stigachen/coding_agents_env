@@ -32,8 +32,8 @@
    - Grok CLI：在 `${GROK_HOME:-$HOME/.grok}/hooks/coding_agents_env.json` 注册
      Stop / Notification hooks，直接指向仓库的 `grok/hooks/notify.sh`，无需 Claude。
      同时在 `config.toml` 写入 `[ui.status_line]` 的 `type` 和 `command`，指向
-     `grok/statusline/statusline.sh`；其他表和键保留，软链改目标并先备份为
-     `config.toml.bak`。不修改 Grok 的 `[compat.claude]`、第三方 hooks 或 Claude
+     `grok/statusline/statusline.sh`；其他表和键保留。无法安全改写时保留原文件并失败。
+     软链改目标，成功改写前备份为 `config.toml.bak`。不修改 Grok 的 `[compat.claude]`、第三方 hooks 或 Claude
      配置。Grok 默认仍合并 Claude 兼容 hooks，本仓库的 Claude 入口一律跳过 Grok
      事件，无论原生 hooks 是否已安装；从旧实现升级需要运行 `bash install.sh grok`。
      通知使用标准 `GROK_NOTIFY_ON_STOP` / `GROK_NOTIFY_ON_PERMISSION` /

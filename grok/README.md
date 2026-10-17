@@ -69,9 +69,11 @@ Grok 通知会暂停；完成原生安装后按标准 `GROK_NOTIFY_ON_*` / `NOTI
 - 在 `${GROK_HOME:-$HOME/.grok}/hooks/coding_agents_env.json` 注册 `Stop` 和
   `Notification`，命令引用仓库里 `grok/hooks/notify.sh` 的绝对路径
 - 在同一目录的 `config.toml` 写入 `[ui.status_line]` 的 `type` 和 `command`，
-  指向 `grok/statusline/statusline.sh`。其他表和键保留；原来的 command
-  不是本仓库脚本时，会在 stderr 提示已接管。`config.toml` 是软链时改目标文件，
-  改写前把目标复制为旁边的 `config.toml.bak`（每次安装覆盖上一份备份）
+  指向 `grok/statusline/statusline.sh`。按 TOML 结构合并，能识别带空格或引号的
+  表头、引号键、inline table、点号键和多行字符串；字符串里的假表头不会被改写。
+  其他表和键保留。原来的 command 不是本仓库脚本时，会在 stderr 提示已接管。
+  认不出或无法安全改写时安装失败，原文件保持不动。`config.toml` 是软链时改目标文件，
+  成功改写前把目标复制为旁边的 `config.toml.bak`（每次安装覆盖上一份备份）
 
 代码不拷贝。仓库移动后重跑安装；通常的脚本更新随 git pull 生效。状态栏表在
 下次启动 Grok 时加载。
