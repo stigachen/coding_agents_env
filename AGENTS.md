@@ -28,7 +28,8 @@
    - Codex：在 `~/.codex/hooks.json` 注册 Stop/PermissionRequest hooks；在
      `~/.codex/config.toml` 写入这两个 hook 的信任 hash（Codex 只执行已信任的
      hook）、`[features] hooks = true`、`[tui]` 状态栏项（改写前备份为
-     `config.toml.bak`）
+     `config.toml.bak`）。Windows 上 hook 命令用 Git Bash 的 `bash.exe` 绝对路径，
+     信任键用 TOML 基本字符串（反斜杠按 TOML 规则转义）
    - Grok CLI：在 `${GROK_HOME:-$HOME/.grok}/hooks/coding_agents_env.json` 注册
      Stop / Notification hooks，直接指向仓库的 `grok/hooks/notify.sh`，无需 Claude。
      同时在 `config.toml` 写入 `[ui.status_line]` 的 `type` 和 `command`，指向
@@ -38,7 +39,8 @@
      事件，无论原生 hooks 是否已安装；从旧实现升级需要运行 `bash install.sh grok`。
      通知使用标准 `GROK_NOTIFY_ON_STOP` / `GROK_NOTIFY_ON_PERMISSION` /
      `GROK_NOTIFY_ON_IDLE` 覆盖公共 `NOTIFY_ON_*`，没有额外总开关。状态栏表在
-     下次启动 Grok 时加载
+     下次启动 Grok 时加载。Windows 上 hook 与状态栏命令写 Git Bash 的 `bash.exe`
+     绝对路径；找不到则安装失败，不写一条会静默失败的 `bash` 命令
 2. **交互式收集通知渠道配置**。检查 `~/.config/coding_agents_env/notify.env`：
    若没有任何渠道键填了值，在对话中询问用户。判断命令（有输出即视为已配置，
    通用键和 `CLAUDE_` / `CODEX_` / `OPENCODE_` / `GROK_` 前缀键都算）：

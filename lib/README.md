@@ -135,8 +135,9 @@ agent 所在终端窗口**有键盘焦点**时，跳过所有推送（IM + 桌�
   丢失——所以 `focus_check.ps1` 的进程祖先链上溯用一次全表查询在内存里完成
   （逐跳 `Get-CimInstance` 每次约 0.6s，长链会耗尽预算），`send.sh` 调用它
   时再套一层 `timeout 6` 兜底（超时按未聚焦处理，宁可多推不可丢）。
-- 推送优先用系统原生 `System32\curl.exe`（不存在时退回 `curl`），消息数据
-  全走 stdin，两种 curl 下 UTF-8 均不受 argv 编码转换影响。
+- 推送优先用系统原生 `System32\curl.exe`（按 `SYSTEMROOT` 转成 Git Bash 路径，
+  不写死 `C:`；找不到时再试 `/c/Windows/System32/curl.exe`，仍没有则退回 `curl`）。
+  消息数据全走 stdin，两种 curl 下 UTF-8 均不受 argv 编码转换影响。
 - 排障时设 `NOTIFY_DEBUG=1`，每次事件的判定和推送结果（curl 退出码与响应）
   Grok 写入 `${CODING_AGENTS_ENV_DIR:-$HOME/.config/coding_agents_env}/notify-debug.log`；
   其他 agent 仍写入 `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/notify-debug.log`。

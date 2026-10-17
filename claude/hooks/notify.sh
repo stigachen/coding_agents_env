@@ -14,6 +14,8 @@ SEND="$SCRIPT_DIR/../../lib/send.sh"
 
 event=$(echo "$input" | jq -r '.hook_event_name // empty')
 cwd=$(echo "$input" | jq -r '.cwd // empty')
+# Windows payloads use backslashes. basename only splits on /.
+cwd=${cwd//\\//}
 project=$(basename "${cwd:-unknown}")
 
 case "$event" in

@@ -140,14 +140,21 @@ TUI 里 `/statusline` 也是改这个键）。`tui.toml` 里是要写进 `[tui]`
    布局的条目也能识别），其他 hook 原样保留；文件不存在则新建
 2. `config.toml`：改写前备份为 `config.toml.bak`。删掉自家的 `[hooks.state."…"]`
    块（key 指向我们的槽位，或 hash 是我们的）和带标记的行，插入 `[tui]` 行和
-   `[features] hooks`，末尾追加新的信任块。有 python3 ≥ 3.11 时用 `tomllib`
-   校验结果，非法则回滚
-3. Windows（Git Bash）：信任 key 里的路径用 `cygpath -w` 转成原生路径，键名改用
-   TOML 的 `'…'` 字面字符串（`"…"` 里反斜杠是转义符）；解析 config.toml 时容忍
-   CRLF。**未在 Windows 上实测**：Codex 在 Windows 上生成 key 用的路径写法
-   （反斜杠、是否带 `\\?\` 前缀）没有验证。若 key 对不上，Codex 只会把这两个
-   hook 标成未信任，在 TUI 里 `/hooks` 手动信任一次即可，Codex 会自己写入正确的
-   state 块，之后重跑 `install.sh` 也不会覆盖它
+   `[features] hooks`，末尾追加新的信任块。python3 能真正执行脚本且 ≥ 3.11 时用
+   `tomllib` 校验，解析失败才回滚。Windows Store 的 `python3` 占位程序视为没有
+   Python，不把合法文件回滚掉
+3. Windows（Git Bash）：hook 命令写成 Git Bash 的 `bash.exe` 绝对路径，脚本路径用
+   `cygpath -m` 的 `C:/...` 形式，不用 PATH 里的 `bash`（那经常是 WSL 启动器）。
+   找不到 Git Bash 时安装失败，可设置 `CLAUDE_CODE_GIT_BASH_PATH` 为 `bash.exe` 的
+   绝对路径。信任 key 里的路径仍用 `cygpath -w` 转成原生路径，键名一律用 TOML
+   基本字符串，反斜杠写成 `\\`（例如
+   `[hooks.state."C:\\Users\\O'Brien\\.codex\\hooks.json:stop:0:0"]`）。路径里的
+   撇号因此不会把键名截断。重装时同时识别旧的 `'…'` 字面键和新的基本字符串键。
+   解析 config.toml 时容忍 CRLF。**未在 Windows 上实测**：Codex 在 Windows 上生成
+   key 用的路径写法（反斜杠、是否带 `\\?\` 前缀）没有验证。若 key 对不上，Codex
+   只会把这两个 hook 标成未信任，在 TUI 里 `/hooks` 手动信任一次即可，Codex 会自己
+   写入正确的 state 块，之后重跑 `install.sh` 也不会覆盖它。已安装的机器需要重跑
+   `bash install.sh codex`，命令和信任 hash 才会按新路径更新
 
 ## 手工测试
 
@@ -165,4 +172,5 @@ echo '{"hook_event_name":"PermissionRequest","cwd":"'$PWD'","tool_name":"Bash"}'
 
 ```bash
 python3 codex/tests/test_notify.py
+python3 codex/tests/test_install.py
 ```

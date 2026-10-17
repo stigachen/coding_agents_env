@@ -95,6 +95,12 @@ class StatuslineTest(unittest.TestCase):
     def test_invalid_json_prints_nothing(self):
         self.assertEqual(self.render(None, raw="{"), "")
 
+    def test_windows_backslash_directory_uses_basename(self):
+        output = self.render({
+            "workspace": {"current_dir": "C:\\Users\\Person\\Project Folder"},
+        })
+        self.assertEqual(self.visible(output), ["Project Folder"])
+
 
 if __name__ == "__main__":
     unittest.main()
