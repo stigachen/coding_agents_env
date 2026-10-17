@@ -67,14 +67,16 @@ notify_target="$REPO_DIR/grok/hooks/notify.sh"
 status_target="$REPO_DIR/grok/statusline/statusline.sh"
 case "$(uname)" in
   MINGW*|MSYS*|CYGWIN*)
-    # PowerShell runs this command. Quote Git Bash's bash.exe, not PATH bash:
-    # on Windows that is usually the WSL launcher and the hook never runs.
+    # Quote Git Bash's bash.exe. PATH bash on Windows is usually the WSL launcher.
+    # Grok's hook runner inserts & before a quoted program path that has
+    # arguments, so the hook command stays without a call operator.
+    # The status line runs the command as written. PowerShell needs & there.
     bash_exe=$(require_git_bash) || exit 1
     bash_quoted=$(shell_single_quote "$bash_exe")
     notify_quoted=$(shell_single_quote "$notify_target")
     status_quoted=$(shell_single_quote "$status_target")
     NOTIFY_CMD="'$bash_quoted' '$notify_quoted'"
-    status_cmd="'$bash_quoted' '$status_quoted'"
+    status_cmd="& '$bash_quoted' '$status_quoted'"
     ;;
   *)
     notify_quoted=$(shell_single_quote "$notify_target")

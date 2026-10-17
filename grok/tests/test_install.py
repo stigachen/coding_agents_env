@@ -158,7 +158,7 @@ class InstallTest(unittest.TestCase):
                 self.assertEqual(data["hooks"][event][0]["hooks"][0]["command"], expected)
                 self.assertNotIn("matcher", data["hooks"][event][0])
         config = self.grok_home / "config.toml"
-        status = "'C:/Git/git-preferred/bash.exe' 'C:/Users/O''Brien/project/grok/statusline/statusline.sh'"
+        status = "& 'C:/Git/git-preferred/bash.exe' 'C:/Users/O''Brien/project/grok/statusline/statusline.sh'"
         first_text = config.read_text()
         self.assertIn('command = "' + status + '"', first_text)
         again = self.run_install(env=env)

@@ -40,7 +40,8 @@
      通知使用标准 `GROK_NOTIFY_ON_STOP` / `GROK_NOTIFY_ON_PERMISSION` /
      `GROK_NOTIFY_ON_IDLE` 覆盖公共 `NOTIFY_ON_*`，没有额外总开关。状态栏表在
      下次启动 Grok 时加载。Windows 上 hook 与状态栏命令写 Git Bash 的 `bash.exe`
-     绝对路径；找不到则安装失败，不写一条会静默失败的 `bash` 命令
+     绝对路径；找不到则安装失败，不写一条会静默失败的 `bash` 命令。状态栏命令
+     另加 PowerShell 调用运算符 `&`；hook 命令不加，Grok 自己会补
 2. **交互式收集通知渠道配置**。检查 `~/.config/coding_agents_env/notify.env`：
    若没有任何渠道键填了值，在对话中询问用户。判断命令（有输出即视为已配置，
    通用键和 `CLAUDE_` / `CODEX_` / `OPENCODE_` / `GROK_` 前缀键都算）：
