@@ -231,7 +231,14 @@ dbg "agent=$agent kind=$kind tag=$tag → 推送: $(printf '%s' "$msg" | head -1
 CURL=curl
 case "$(uname)" in
   MINGW*|MSYS*|CYGWIN*)
-    [ -x /c/Windows/System32/curl.exe ] && CURL=/c/Windows/System32/curl.exe ;;
+    # SYSTEMROOT is not always C:. Fall back to the old /c path if cygpath fails.
+    winroot=$(cygpath -u "${SYSTEMROOT:-C:\\Windows}" 2>/dev/null || true)
+    if [ -n "$winroot" ] && [ -x "$winroot/System32/curl.exe" ]; then
+      CURL="$winroot/System32/curl.exe"
+    elif [ -x /c/Windows/System32/curl.exe ]; then
+      CURL=/c/Windows/System32/curl.exe
+    fi
+    ;;
 esac
 
 # ---- Telegram ----

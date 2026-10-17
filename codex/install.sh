@@ -14,11 +14,25 @@
 set -euo pipefail
 
 REPO_DIR="${REPO_DIR:-$(cd "$(dirname "$0")/.." && pwd)}"
+. "$REPO_DIR/lib/runtime.sh"
 CODEX_HOME="${CODEX_HOME:-$HOME/.codex}"
 HOOKS="$CODEX_HOME/hooks.json"
 CONFIG="$CODEX_HOME/config.toml"
 MARK="# coding_agents_env"
-NOTIFY_CMD="bash \"$REPO_DIR/codex/hooks/notify.sh\""
+# Resolve the hook command before creating any files, so a missing Git Bash
+# does not leave an empty Codex home behind.
+case "$(uname)" in
+  MINGW*|MSYS*|CYGWIN*)
+    # Codex runs the command outside Git Bash. PATH bash is often the WSL
+    # launcher, which does not understand a C:/... script path.
+    bash_exe=$(require_git_bash) || exit 1
+    script=$(cygpath -m "$REPO_DIR/codex/hooks/notify.sh")
+    NOTIFY_CMD="\"$bash_exe\" \"$script\""
+    ;;
+  *)
+    NOTIFY_CMD="bash \"$REPO_DIR/codex/hooks/notify.sh\""
+    ;;
+esac
 TIMEOUT=30
 
 mkdir -p "$CODEX_HOME"
@@ -36,6 +50,16 @@ sha256() {
   elif command -v sha256sum >/dev/null 2>&1; then sha256sum | cut -d' ' -f1
   else openssl dgst -sha256 | sed 's/.*= *//'
   fi
+}
+
+# TOML basic string, including the quotes. A literal '…' string ends at the
+# first apostrophe, so C:\Users\O'Brien\... is not valid TOML. Backslashes are
+# escaped and apostrophes stay inside the double quotes.
+toml_basic_string() {
+  local s=$1
+  s=${s//\\/\\\\}
+  s=${s//\"/\\\"}
+  printf '"%s"' "$s"
 }
 
 # ---- 1. hooks.json ----
@@ -63,9 +87,7 @@ for pair in Stop:stop PermissionRequest:permission_request; do
         '{event_name: $l, hooks: [{type: "command", command: $c, timeout: $t, async: false}]}' \
       | tr -d '\n' | sha256)
   key="$HOOKS_KEY_PATH:$label:$gi:0"
-  # TOML 的 "…" 基本字符串里 \ 是转义符，Windows 路径（C:\Users\…）会解析失败；
-  # 含反斜杠时改用 '…' 字面字符串作键名（Codex 读到的键值相同）
-  case "$key" in *\\*) qkey="'$key'" ;; *) qkey="\"$key\"" ;; esac
+  qkey=$(toml_basic_string "$key")
   our_keys="$our_keys
 $key"
   our_hashes="$our_hashes
@@ -93,15 +115,44 @@ BEGIN {
   n = split(tui_keys, a, " ");                for (i = 1; i <= n; i++) if (a[i] != "") TK[a[i]] = 1
   seen_tui = 0; seen_features = 0; features_has_hooks = 0
 }
-# 取 [hooks.state."…"] / [hooks.state.'"'"'…'"'"'] 头里的键名（两种引号都认）
-function state_key(l,   k) {
-  k = l; sub(/^\[hooks\.state\.["'"'"']/, "", k); sub(/["'"'"']\][ \t]*$/, "", k); return k
+# 取 hooks.state 头里的键名，双引号和字面引号都认。
+# 基本字符串还原反斜杠，才能和 OUR_KEYS 里的原始路径比较；字面字符串只去引号。
+# 重装因此会删掉旧的字面引号键，而不是留下重复键。
+function is_state_header(l) {
+  return substr(l, 1, 13) == "[hooks.state." && (substr(l, 14, 1) == "\"" || substr(l, 14, 1) == "\047")
+}
+function state_key(l,    k, quote, i, n, c, out) {
+  if (!is_state_header(l)) return ""
+  k = substr(l, 14)
+  sub(/\][ \t]*$/, "", k)
+  quote = substr(k, 1, 1)
+  if (quote == "\047") {
+    sub(/^\047/, "", k)
+    sub(/\047$/, "", k)
+    return k
+  }
+  sub(/^"/, "", k)
+  sub(/"$/, "", k)
+  out = ""
+  n = length(k)
+  i = 1
+  while (i <= n) {
+    c = substr(k, i, 1)
+    if (c == "\\" && i < n) {
+      out = out substr(k, i + 1, 1)
+      i += 2
+    } else {
+      out = out c
+      i++
+    }
+  }
+  return out
 }
 # 第一遍：找出要删的 hooks.state 块（按 key 或 hash）。匹配前去掉行尾 \r，
 # Windows 上 config.toml 可能是 CRLF；输出仍写原行，不改用户文件的换行风格
 NR == FNR {
   l = $0; sub(/\r$/, "", l)
-  if (l ~ /^\[hooks\.state\.["'"'"']/) {
+  if (is_state_header(l)) {
     cur = state_key(l)
     if (cur in K) DROP[cur] = 1
   } else if (l ~ /^\[/) cur = ""
@@ -118,7 +169,7 @@ function out(l) { if (l == "") { pending++; return } ; while (pending > 0) { pri
   line = $0; l = line; sub(/\r$/, "", l)
   if (l ~ /^\[/) {
     section = l
-    if (l ~ /^\[hooks\.state\.["'"'"']/) {
+    if (is_state_header(l)) {
       dropping = (state_key(l) in DROP); if (dropping) next
     } else dropping = 0
     if (l ~ /^\[tui\]/)      { out(line); seen_tui = 1; out(tui_lines); next }
@@ -156,9 +207,12 @@ END {
 printf '%s' "$state_blocks" >> "$CONFIG.tmp"
 mv "$CONFIG.tmp" "$CONFIG"
 
-# 语法自检（有 python3 且 ≥3.11 时）
-if command -v python3 >/dev/null 2>&1; then
-  python3 - "$CONFIG" <<'PY' 2>/dev/null || { echo "⚠️  $CONFIG 不是合法 TOML，已回滚为 $CONFIG.bak" >&2; cp "$CONFIG.bak" "$CONFIG"; exit 1; }
+# 语法自检：python3 能真正执行脚本且带 tomllib 时才校验。Windows Store 的
+# python3 占位程序（常见退出码 9009）视为没有 Python，不回滚已经写好的文件。
+# 只有退出码 1（解析失败）才回滚。
+if python3_runs; then
+  set +e
+  python3 - "$CONFIG" <<'PY' 2>/dev/null
 import sys
 try:
     import tomllib
@@ -166,6 +220,13 @@ except ImportError:
     sys.exit(0)
 tomllib.load(open(sys.argv[1], "rb"))
 PY
+  rc=$?
+  set -e
+  if [ "$rc" -eq 1 ]; then
+    echo "⚠️  $CONFIG 不是合法 TOML，已回滚为 $CONFIG.bak" >&2
+    cp "$CONFIG.bak" "$CONFIG"
+    exit 1
+  fi
 fi
 
 echo "✅ Codex"

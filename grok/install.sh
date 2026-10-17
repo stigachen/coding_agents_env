@@ -9,6 +9,7 @@
 set -euo pipefail
 
 REPO_DIR="${REPO_DIR:-$(cd "$(dirname "$0")/.." && pwd)}"
+. "$REPO_DIR/lib/runtime.sh"
 GROK_DIR="${GROK_HOME:-$HOME/.grok}"
 HOOK_DIR="$GROK_DIR/hooks"
 HOOKS="$HOOK_DIR/coding_agents_env.json"
@@ -44,8 +45,11 @@ resolve_file() {
   local p=$1 i=0 link dir
   while [ -L "$p" ] && [ "$i" -lt 10 ]; do
     link=$(readlink "$p")
+    # Windows readlink can return C:\... or C:/.... A drive path is absolute.
+    # Joining it onto the symlink's directory makes the install edit the wrong file.
+    link=${link//\\//}
     case "$link" in
-      /*) p=$link ;;
+      /*|[A-Za-z]:*) p=$link ;;
       *)
         dir=$(cd "$(dirname "$p")" && pwd)
         p="$dir/$link" ;;
@@ -60,13 +64,29 @@ resolve_file() {
 }
 
 notify_target="$REPO_DIR/grok/hooks/notify.sh"
-notify_quoted=$(shell_single_quote "$notify_target")
-# Keep spaces and shell metacharacters in the path literal.
-NOTIFY_CMD="bash '$notify_quoted'"
-
 status_target="$REPO_DIR/grok/statusline/statusline.sh"
-status_quoted=$(shell_single_quote "$status_target")
-STATUSLINE_TOML=$(toml_basic_escape "bash '$status_quoted'")
+case "$(uname)" in
+  MINGW*|MSYS*|CYGWIN*)
+    # Quote Git Bash's bash.exe. PATH bash on Windows is usually the WSL launcher.
+    # Grok's hook runner inserts & before a quoted program path that has
+    # arguments, so the hook command stays without a call operator.
+    # The status line runs the command as written. PowerShell needs & there.
+    bash_exe=$(require_git_bash) || exit 1
+    bash_quoted=$(shell_single_quote "$bash_exe")
+    notify_quoted=$(shell_single_quote "$notify_target")
+    status_quoted=$(shell_single_quote "$status_target")
+    NOTIFY_CMD="'$bash_quoted' '$notify_quoted'"
+    status_cmd="& '$bash_quoted' '$status_quoted'"
+    ;;
+  *)
+    notify_quoted=$(shell_single_quote "$notify_target")
+    status_quoted=$(shell_single_quote "$status_target")
+    # Keep spaces and shell metacharacters in the path literal.
+    NOTIFY_CMD="bash '$notify_quoted'"
+    status_cmd="bash '$status_quoted'"
+    ;;
+esac
+STATUSLINE_TOML=$(toml_basic_escape "$status_cmd")
 export STATUSLINE_TOML
 
 mkdir -p "$HOOK_DIR"
@@ -114,12 +134,14 @@ read_mode() {
   esac
 }
 
-# When python3 has tomllib, refuse to publish a merge that does not parse or
-# does not point at this repo's status line. Older Python skips the check.
+# When python3 can run a script and has tomllib, refuse to publish a merge
+# that does not parse or does not point at this repo's status line.
+# The Windows Store python3 stub is on PATH but cannot run a script; skip it.
+# Older Python without tomllib skips the check.
 # Exit 1 means the file is not TOML; exit 2 means the status line is missing.
 toml_check() {
   local file=$1
-  command -v python3 >/dev/null 2>&1 || return 0
+  python3_runs || return 0
   python3 - "$file" <<'PY'
 import sys
 try:

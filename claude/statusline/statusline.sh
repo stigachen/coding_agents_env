@@ -15,6 +15,8 @@ effort=$(echo "$input" | jq -r '.effort.level // empty')
 
 # ---- 目录 + git ----
 dir=$(echo "$input" | jq -r '.workspace.current_dir')
+# Windows payloads use backslashes. basename and git -C only split on /.
+dir=${dir//\\//}
 cwd_display=$(basename "$dir")
 branch=""
 if git -C "$dir" --no-optional-locks rev-parse --is-inside-work-tree >/dev/null 2>&1; then

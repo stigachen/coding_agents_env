@@ -88,6 +88,15 @@ Grok 会合并原生、Claude 兼容等来源的 hooks；**注册原生 hooks �
 脚本兼容 macOS 自带 Bash 3.2 与 Windows Git Bash；依赖 `bash`、`jq`、
 `curl`、`git`，与仓库其他模块一致。
 
+Windows 上 hook 和状态栏命令写成 Git Bash 的 `bash.exe` 绝对路径（`C:/...`），
+不用 PATH 里的 `bash`（那经常是 WSL 启动器）。查找顺序是
+`CLAUDE_CODE_GIT_BASH_PATH`、`Program Files\Git`、`%LOCALAPPDATA%\Programs\Git`、
+`Program Files (x86)\Git`，最后才看 PATH 里不是 System32 的 bash。找不到就安装
+失败。Hook 命令不加 PowerShell 的 `&`：Grok 会给「引号里的程序路径，后面还有
+参数」自行补上调用运算符。状态栏没有这步改写，命令行按原样交给检测到的
+shell，所以写成 `& 'bash.exe' 'statusline.sh'`。已安装的机器需要重跑
+`bash install.sh grok`，旧命令才会换成新路径；状态栏表仍在下次启动 Grok 时加载。
+
 ## 配置
 
 密钥和开关仍只放在 `~/.config/coding_agents_env/notify.env`（chmod 600），

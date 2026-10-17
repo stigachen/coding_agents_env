@@ -41,6 +41,8 @@ unset IFS
 
 cwd_display=""
 if [ -n "$dir" ]; then
+  # Windows payloads use backslashes. basename only splits on /.
+  dir=${dir//\\//}
   cwd_display=$(basename "$dir")
 fi
 

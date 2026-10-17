@@ -51,6 +51,22 @@ class NotifyTest(unittest.TestCase):
         self.assertEqual(result.stderr, "")
         return result.stdout
 
+    def test_windows_backslash_transcript_can_suppress_auto_review(self):
+        windows = str(self.transcript).replace("/", "\\")
+        self.assertNotIn("/", windows)
+        self.assertEqual(self.run_hook(
+            context("current", "auto_review"),
+            cwd=r"C:\Users\Person\Project Folder",
+            transcript_path=windows,
+        ), "")
+        output = self.run_hook(
+            context("current", "user"),
+            cwd=r"C:\Users\Person\Project Folder",
+            transcript_path=windows,
+        )
+        self.assertIn("[Project Folder] Codex", output)
+        self.assertNotIn("[C:", output)
+
     def test_auto_review_shell_and_patch_are_silent(self):
         for tool in ("Bash", "apply_patch"):
             with self.subTest(tool=tool):

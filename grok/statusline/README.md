@@ -9,6 +9,9 @@ type = "command"
 command = "bash '/绝对路径/grok/statusline/statusline.sh'"
 ```
 
+Windows 上同一条是 `& 'C:/.../bash.exe' 'C:/.../grok/statusline/statusline.sh'`。
+Grok 的 hook 会自己补 PowerShell 的 `&`，状态栏不会，所以只有状态栏带这个前缀。
+
 `git pull` 后脚本立即生效。`[ui.status_line]` 在 Grok 启动时读取，改表或刚安装
 之后要重启一次。仓库内的 `.grok/config.toml` 不能设置这一项。
 

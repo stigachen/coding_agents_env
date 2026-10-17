@@ -98,29 +98,119 @@ class InstallTest(unittest.TestCase):
         self.assertEqual(result.stderr, "")
         self.assertIn("agent=Grok kind=stop ", result.stdout)
 
-    def test_windows_hook_command_quotes_apostrophe_for_powershell(self):
+    def use_windows_stubs(self):
         # Simulate Windows path generation only; do not execute PowerShell.
         uname = self.bin / "uname"
         uname.unlink()  # Replace our symlink, never write through it to the system binary.
         uname.write_text("#!/bin/sh\nprintf '%s\\n' MINGW64_NT\n")
         uname.chmod(0o755)
         cygpath = self.bin / "cygpath"
-        cygpath.write_text(
-            "#!/bin/sh\n"
-            "path=\n"
-            "for arg in \"$@\"; do path=$arg; done\n"
-            "case $path in\n"
-            "  *statusline.sh) printf '%s\\n' \"C:/Users/O'Brien/project/grok/statusline/statusline.sh\" ;;\n"
-            "  *) printf '%s\\n' \"C:/Users/O'Brien/project/grok/hooks/notify.sh\" ;;\n"
-            "esac\n")
+        cygpath.write_text("\n".join([
+            "#!/bin/sh",
+            "path=",
+            "for arg in \"$@\"; do",
+            "  case \"$arg\" in",
+            "    -w|-m|-u|-wa|-ma) ;;",
+            "    *) path=$arg ;;",
+            "  esac",
+            "done",
+            "case \"$path\" in",
+            "  *system32*|*System32*|*Sysnative*|*SysWOW64*|*sysnative*|*syswow64*)",
+            "    printf '%s\\n' 'C:\\Windows\\System32\\bash.exe' ;;",
+            "  */bin/bash)",
+            "    printf '%s\\n' 'C:\\Windows\\System32\\bash.exe' ;;",
+            "  *statusline.sh)",
+            "    printf '%s\\n' \"C:/Users/O'Brien/project/grok/statusline/statusline.sh\" ;;",
+            "  *notify.sh)",
+            "    printf '%s\\n' \"C:/Users/O'Brien/project/grok/hooks/notify.sh\" ;;",
+            "  *git-preferred*)",
+            "    printf '%s\\n' 'C:/Git/git-preferred/bash.exe' ;;",
+            "  *git-pf86*)",
+            "    printf '%s\\n' 'C:/Git/git-pf86/bash.exe' ;;",
+            "  *git-custom*)",
+            "    printf '%s\\n' 'C:/Git/git-custom/bash.exe' ;;",
+            "  *git-local*)",
+            "    printf '%s\\n' 'C:/Git/git-local/bash.exe' ;;",
+            "  *git-pf*)",
+            "    printf '%s\\n' 'C:/Git/git-pf/bash.exe' ;;",
+            "  *)",
+            "    printf '%s\\n' 'C:/Program Files/Git/bin/bash.exe' ;;",
+            "esac",
+            "",
+        ]))
         cygpath.chmod(0o755)
-        self.run_install()
+
+    def hook_command(self):
         data = json.loads(self.hooks.read_text())
-        expected = "bash 'C:/Users/O''Brien/project/grok/hooks/notify.sh'"
+        return data["hooks"]["Stop"][0]["hooks"][0]["command"]
+
+    def test_windows_hook_command_quotes_apostrophe_for_powershell(self):
+        self.use_windows_stubs()
+        bash_exe = self.root / "git-preferred" / "bash.exe"
+        bash_exe.parent.mkdir()
+        bash_exe.write_text("")
+        env = {"CLAUDE_CODE_GIT_BASH_PATH": str(bash_exe)}
+        self.run_install(env=env)
+        data = json.loads(self.hooks.read_text())
+        expected = "'C:/Git/git-preferred/bash.exe' 'C:/Users/O''Brien/project/grok/hooks/notify.sh'"
         for event in ("Stop", "Notification"):
             with self.subTest(event=event):
                 self.assertEqual(data["hooks"][event][0]["hooks"][0]["command"], expected)
                 self.assertNotIn("matcher", data["hooks"][event][0])
+        config = self.grok_home / "config.toml"
+        status = "& 'C:/Git/git-preferred/bash.exe' 'C:/Users/O''Brien/project/grok/statusline/statusline.sh'"
+        first_text = config.read_text()
+        self.assertIn('command = "' + status + '"', first_text)
+        again = self.run_install(env=env)
+        self.assertNotIn("接管", again.stderr)
+        self.assertEqual(config.read_text(), first_text)
+        self.assertEqual(json.loads(self.hooks.read_text()), data)
+
+    def test_windows_git_bash_search_skips_system32(self):
+        self.use_windows_stubs()
+        result = self.run_install(success=False)
+        self.assertIn("找不到 Git Bash", result.stderr)
+        self.assertIn("CLAUDE_CODE_GIT_BASH_PATH", result.stderr)
+        self.assertFalse(self.hooks.exists())
+        self.assertFalse((self.grok_home / "config.toml").exists())
+
+        def touch(path):
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("")
+            return path
+
+        system = touch(self.root / "win-system32" / "bash.exe")
+        preferred = touch(self.root / "git-preferred" / "bash.exe")
+        program = touch(self.root / "git-pf" / "Git" / "bin" / "bash.exe")
+        local = touch(self.root / "git-local" / "Programs" / "Git" / "bin" / "bash.exe")
+        pf86 = touch(self.root / "git-pf86" / "Git" / "bin" / "bash.exe")
+        custom = touch(self.root / "git-custom" / "bash.exe")
+        cases = (
+            ("env", {"CLAUDE_CODE_GIT_BASH_PATH": str(preferred), "PROGRAMFILES": str(self.root / "git-pf")},
+             "'C:/Git/git-preferred/bash.exe'"),
+            ("program-files", {"PROGRAMFILES": str(self.root / "git-pf"), "LOCALAPPDATA": str(self.root / "git-local")},
+             "'C:/Git/git-pf/bash.exe'"),
+            ("local", {"LOCALAPPDATA": str(self.root / "git-local"), "ProgramFiles(x86)": str(self.root / "git-pf86")},
+             "'C:/Git/git-local/bash.exe'"),
+            ("pf86", {"ProgramFiles(x86)": str(self.root / "git-pf86")},
+             "'C:/Git/git-pf86/bash.exe'"),
+            ("path", {"PATH": str(custom.parent) + ":" + str(self.bin)},
+             "'C:/Git/git-custom/bash.exe'"),
+            ("skip-wsl-then-program-files", {
+                "CLAUDE_CODE_GIT_BASH_PATH": str(system),
+                "PROGRAMFILES": str(self.root / "git-pf"),
+                "PATH": str(custom.parent) + ":" + str(self.bin),
+            }, "'C:/Git/git-pf/bash.exe'"),
+        )
+        for name, env, prefix in cases:
+            with self.subTest(which=name):
+                if self.grok_home.exists():
+                    shutil.rmtree(self.grok_home)
+                self.run_install(env=env)
+                command = self.hook_command()
+                self.assertTrue(command.startswith(prefix + " "), command)
+                self.assertIn("O''Brien", command)
+                self.assertNotIn("System32", command)
 
     def test_third_party_files_and_mixed_handlers_are_preserved(self):
         self.hooks.parent.mkdir(parents=True)
@@ -344,6 +434,25 @@ class InstallTest(unittest.TestCase):
         self.run_install(success=False)
         self.assertTrue(link.is_symlink())
         self.assertFalse((self.root / "missing.toml").exists())
+
+    def test_windows_drive_symlink_is_not_joined_as_relative(self):
+        self.grok_home.mkdir()
+        decoy_dir = self.grok_home / "C:"
+        decoy_dir.mkdir()
+        decoy = decoy_dir / "real.toml"
+        decoy.write_text("decoy = true\n")
+        link = self.grok_home / "config.toml"
+        for target in ("C:/real.toml", "C:\\real.toml"):
+            with self.subTest(target=target):
+                if link.is_symlink() or link.exists():
+                    link.unlink()
+                link.symlink_to(target)
+                decoy.write_text("decoy = true\n")
+                result = self.run_install(success=False)
+                self.assertIn("软链悬空", result.stderr)
+                self.assertTrue(link.is_symlink())
+                self.assertEqual(os.readlink(link), target)
+                self.assertEqual(decoy.read_text(), "decoy = true\n")
 
     def write_grok_config(self, contents, mode=0o640):
         self.grok_home.mkdir(exist_ok=True)
@@ -574,6 +683,29 @@ exit 0
         if python.exists() or python.is_symlink():
             python.unlink()
         self.assertFalse(python.exists())
+
+    def write_python(self, script):
+        python = self.bin / "python3"
+        if python.is_symlink() or python.exists():
+            python.unlink()
+        python.write_text(script)
+        python.chmod(0o755)
+
+    def test_python3_that_cannot_run_skips_toml_check(self):
+        self.write_python("#!/bin/sh\nexit 9009\n")
+        self.run_install()
+        config = self.grok_home / "config.toml"
+        status = self.load_toml(config)["ui"]["status_line"]
+        self.assertEqual(status["type"], "command")
+        self.assertIn("/grok/statusline/statusline.sh", status["command"])
+
+    def test_python3_exit_1_rejects_without_replacing_config(self):
+        self.write_python("#!/bin/sh\nif [ \"$1\" = \"-c\" ]; then exit 0; fi\nexit 1\n")
+        config = self.write_grok_config("yolo = false\n")
+        original = config.read_bytes()
+        result = self.run_install(success=False)
+        self.assertIn("不是合法 TOML", result.stderr)
+        self.assert_config_unchanged(config, original)
 
     def test_root_inline_ui_merges_without_python(self):
         self.hide_python()

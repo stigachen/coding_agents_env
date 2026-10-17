@@ -15,6 +15,8 @@ SEND="$SCRIPT_DIR/../../lib/send.sh"
 
 event=$(echo "$input" | jq -r '.hook_event_name // empty')
 cwd=$(echo "$input" | jq -r '.cwd // empty')
+# Windows payloads use backslashes. basename only splits on /.
+cwd=${cwd//\\//}
 project=$(basename "${cwd:-unknown}")
 
 # Desktop background suggestions use ephemeral sessions and explicitly send
@@ -36,6 +38,8 @@ permission_reviewer() {
   case "$tool" in Bash|apply_patch) ;; *) return ;; esac
   turn=$(printf '%s' "$input" | jq -r '.turn_id // empty')
   transcript=$(printf '%s' "$input" | jq -r '.transcript_path // empty')
+  # [ -f ] does not treat \ as a separator, so a C:\... transcript would miss.
+  transcript=${transcript//\\//}
   [ -n "$turn" ] && [ -n "$transcript" ] && [ -f "$transcript" ] && [ -r "$transcript" ] || return
 
   # 有界读取，避免长会话耗尽 hook 超时预算；截断首行/未写完的末行按无效 JSON 忽略。

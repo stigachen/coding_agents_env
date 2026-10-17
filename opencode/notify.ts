@@ -36,11 +36,14 @@ const SEND = WIN ? join(HERE, "..", "lib", "send.sh").replace(/\\/g, "/") : join
 // 优先用 Claude Code 的同名变量指定的路径，再找 Git 的默认安装位置
 function bashPath(): string {
   if (!WIN) return "bash"
+  const pf86 = process.env["ProgramFiles(x86)"] || "C:\\Program Files (x86)"
   const candidates = [
     process.env.CLAUDE_CODE_GIT_BASH_PATH,
     join(process.env.ProgramFiles || "C:\\Program Files", "Git", "bin", "bash.exe"),
     join(process.env.ProgramFiles || "C:\\Program Files", "Git", "usr", "bin", "bash.exe"),
     join(process.env.LOCALAPPDATA || "", "Programs", "Git", "bin", "bash.exe"),
+    join(pf86, "Git", "bin", "bash.exe"),
+    join(pf86, "Git", "usr", "bin", "bash.exe"),
   ]
   for (const c of candidates) if (c) { try { if (statSync(c).isFile()) return c } catch {} }
   return "bash"
@@ -71,6 +74,7 @@ function send(kind: string, directory: string | undefined, body: string): void {
       stdio: ["pipe", "ignore", "ignore"],
       env: process.env,
       detached: true,
+      windowsHide: true,
     })
     child.unref()
     child.on("error", (e) => dbg("spawn error: " + String(e)))
