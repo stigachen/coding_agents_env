@@ -221,8 +221,15 @@ install_statusline() {
   require_toml "$sl_tmp" 0
   # Set the mode before rename. A failed chmod then leaves the original in place.
   chmod "$mode" "$sl_tmp"
-  cp "$config" "$config.bak"
-  mv "$sl_tmp" "$config"
+  # Keep the first pre-install copy. A later run must not replace it with the
+  # already merged file. Skip the copy when the bytes will not change, so a
+  # config this installer created (no user original) never grows a .bak.
+  if files_differ "$config" "$sl_tmp"; then
+    preserve_original_backup "$config"
+    mv "$sl_tmp" "$config"
+  else
+    rm -f "$sl_tmp"
+  fi
   sl_tmp=""
 }
 

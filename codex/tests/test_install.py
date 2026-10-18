@@ -25,7 +25,7 @@ class InstallTest(unittest.TestCase):
         self.bin = self.root / "bin"
         self.bin.mkdir()
         for name in ("bash", "jq", "dirname", "mkdir", "tr", "grep", "sed", "head", "mktemp",
-                     "mv", "rm", "uname", "cat", "cp", "awk", "cut", "printenv", "shasum",
+                     "mv", "rm", "uname", "cat", "cp", "cmp", "awk", "cut", "printenv", "shasum",
                      "sha256sum", "openssl", "python3"):
             executable = shutil.which(name)
             if executable:
@@ -112,6 +112,22 @@ class InstallTest(unittest.TestCase):
         self.run_install()
         self.assertEqual(config_path.read_text(), text)
         self.assertEqual(hooks_path.read_text(), hooks_text)
+        self.assertFalse(config_path.with_name("config.toml.bak").exists())
+
+    def test_existing_config_backup_survives_a_second_install(self):
+        self.codex_home.mkdir(parents=True)
+        config = self.codex_home / "config.toml"
+        original = "keep = 1\n"
+        config.write_text(original)
+        self.run_install()
+        backup = config.with_name("config.toml.bak")
+        self.assertEqual(backup.read_text(), original)
+        self.assertNotEqual(config.read_text(), original)
+        config.write_text(config.read_text() + "extra = 1\n")
+        self.run_install()
+        self.assertEqual(backup.read_text(), original)
+        self.assertIn("keep = 1", config.read_text())
+        self.assertIn("trusted_hash", config.read_text())
 
     def test_windows_command_and_trust_key_round_trip(self):
         self.use_windows_stubs()

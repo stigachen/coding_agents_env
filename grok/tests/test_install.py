@@ -28,7 +28,7 @@ class InstallTest(unittest.TestCase):
         # Keep real coding agents out of PATH, including during automatic detection.
         for name in ("bash", "jq", "curl", "chmod", "dirname", "basename", "printenv", "mkdir", "tr", "grep",
                      "sed", "tail", "head", "mktemp", "mv", "rm", "uname", "ln", "cat",
-                     "cp", "stat", "awk", "sort", "cut", "readlink", "realpath", "date",
+                     "cp", "cmp", "stat", "awk", "sort", "cut", "readlink", "realpath", "date",
                      "python3"):
             executable = shutil.which(name)
             if executable:
@@ -342,6 +342,7 @@ class InstallTest(unittest.TestCase):
         again = self.run_install()
         self.assertNotIn("接管", again.stderr)
         self.assertEqual(config.read_text(), text)
+        self.assertFalse(config.with_name("config.toml.bak").exists())
 
     def test_statusline_preserves_other_tables_mode_and_runs(self):
         self.grok_home.mkdir()
@@ -370,6 +371,10 @@ class InstallTest(unittest.TestCase):
         again = self.run_install()
         self.assertNotIn("接管", again.stderr)
         self.assertEqual(config.read_text(), text)
+        self.assertEqual(config.with_name("config.toml.bak").read_text(), original)
+        config.write_text(text + "extra = 1\n")
+        self.run_install()
+        self.assertEqual(config.with_name("config.toml.bak").read_text(), original)
 
     def test_statusline_follows_relative_symlink_chain(self):
         actual = self.home / "actual.toml"

@@ -82,3 +82,27 @@ python3_runs() {
   command -v python3 >/dev/null 2>&1 || return 1
   python3 -c 'import sys; raise SystemExit(0)' >/dev/null 2>&1 || return 1
 }
+
+# Return 0 when the two files are not byte-identical.
+# cmp is POSIX and ships with macOS, Linux, and Git Bash. If it is missing,
+# treat the files as different so a real user config is still backed up once.
+files_differ() {
+  if command -v cmp >/dev/null 2>&1; then
+    if cmp -s "$1" "$2"; then
+      return 1
+    fi
+    return 0
+  fi
+  return 0
+}
+
+# Copy file to file.bak the first time we are about to change a file that
+# already existed. Later installs leave that backup alone, so the pre-install
+# original survives repeated runs. Callers must not call this for a file this
+# install just created; an absent config gets no backup.
+preserve_original_backup() {
+  local file=$1
+  [ -f "$file" ] || return 0
+  [ -e "${file}.bak" ] && return 0
+  cp "$file" "${file}.bak"
+}

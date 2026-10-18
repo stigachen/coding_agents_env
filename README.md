@@ -92,6 +92,16 @@ bash install.sh grok       # Grok 原生通知和自定义状态栏，不依赖 
 - **适配层薄，内核厚。** 每个 agent 目录只把自家事件格式翻译成 `lib/send.sh`
   的调用，措辞、静音、推送逻辑只有一份。
 
+## 测试
+
+```bash
+python3 tests/run_all.py
+```
+
+GitHub Actions 在 `ubuntu-latest`、`macos-latest` 和 `windows-latest`（Git Bash）
+上跑同一入口。各 agent 目录里的 `python3 -m unittest discover -s <agent>/tests`
+仍然可以单独跑。
+
 ## 更新
 
 ```bash

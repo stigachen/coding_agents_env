@@ -36,8 +36,31 @@ for dep in jq curl; do
   }
 done
 
-chmod +x "$REPO_DIR"/lib/*.sh "$REPO_DIR"/*/hooks/*.sh "$REPO_DIR"/*/statusline/*.sh \
-  "$REPO_DIR"/*/install.sh 2>/dev/null || true
+# Make shipped scripts executable without dirtying a filemode=true checkout.
+# lib/runtime.sh is tracked as 100644 (it is sourced, not executed). chmod +x
+# on that mode shows up as a git modification on macOS/Linux. Windows clones
+# use core.filemode=false, so a mode change is invisible to git there; scripts
+# recorded as executable are still chmod'd when the worktree bit is missing.
+ensure_script_modes() {
+  local f rel mode
+  for f in "$REPO_DIR"/lib/*.sh "$REPO_DIR"/*/hooks/*.sh "$REPO_DIR"/*/statusline/*.sh \
+    "$REPO_DIR"/*/install.sh; do
+    [ -f "$f" ] || continue
+    if [ -x "$f" ]; then
+      continue
+    fi
+    rel=${f#"$REPO_DIR"/}
+    mode=""
+    if command -v git >/dev/null 2>&1; then
+      mode=$(git -C "$REPO_DIR" ls-files -s -- "$rel" 2>/dev/null | awk 'NR==1 { print $1; exit }') || mode=""
+    fi
+    case "$mode" in
+      100644) continue ;;
+    esac
+    chmod +x "$f" 2>/dev/null || true
+  done
+}
+ensure_script_modes
 
 # ---- notify.env：生成 / 迁移 / 补齐 ----
 mkdir -p "$CONFIG_DIR"

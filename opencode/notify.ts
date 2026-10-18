@@ -18,15 +18,28 @@
 //   注意：插件跑在 OpenCode 的后台服务进程里，不是你终端里的进程，所以 send.sh
 //   的"终端聚焦则静音"对 OpenCode 判不准（祖先进程链里没有当前终端），基本会
 //   照常推送。桌面级的"窗口在前台就不提醒"请用 OpenCode 自带的 attention 设置。
-//   - v1（旧版）：server() 返回 hooks 对象，session.idle → stop，permission.ask → permission。
+//   - v1（旧版）：server() 返回 hooks 对象。session.idle → stop。
+//     等审批有两条历史路径：旧版调用 permission.ask hook；OpenCode 1.19
+//     （以及 1.x 里 Permission.ask 不再 trigger 该 hook 的版本）只在事件总线上
+//     发 permission.asked，插件的 event hook 收到 { event: { type, properties } }。
+//     两条都听。若某个版本对同一次审批同时投递 hook 和事件，按请求 id 合并成一条。
 //     v2 已激活时 v1 的处理函数直接返回，避免重复推送。
 
 import { spawn } from "node:child_process"
 import { appendFileSync, realpathSync, statSync } from "node:fs"
 import { homedir } from "node:os"
 import { basename, dirname, join } from "node:path"
+import { fileURLToPath } from "node:url"
 
-const HERE = dirname(realpathSync(import.meta.path))
+// Bun 提供 import.meta.path。Node 的测试入口只有 filename / url。
+function moduleFile(): string {
+  const meta = import.meta as ImportMeta & { path?: string; filename?: string }
+  if (typeof meta.path === "string" && meta.path) return meta.path
+  if (typeof meta.filename === "string" && meta.filename) return meta.filename
+  return fileURLToPath(meta.url)
+}
+
+const HERE = dirname(realpathSync(moduleFile()))
 const AGENT = "OpenCode"
 const WIN = process.platform === "win32"
 // Git Bash 接受 C:/Users/... 形式的路径
@@ -162,16 +175,62 @@ async function setup(ctx: any) {
   return () => controller.abort()
 }
 
+function permissionRequestId(value: any): string | undefined {
+  const id = value?.id
+  return typeof id === "string" && id !== "" ? id : undefined
+}
+
+// One approval must produce one notification when a host delivers both the
+// permission.ask hook and the permission.asked bus event. Ids match across
+// those two payloads in every version that emits both (the same request object).
+// A payload with no id still collapses a second delivery in the next two seconds,
+// and does not suppress a later request that has its own id.
+function createPermissionGate() {
+  const seen = new Map<string, number>()
+  let lastAt = 0
+  const ttl = 10 * 60_000
+  const anonWindow = 2_000
+  return (id: string | undefined, now = Date.now()): boolean => {
+    for (const [key, at] of seen) {
+      if (now - at > ttl) seen.delete(key)
+    }
+    if (id) {
+      const prev = seen.get(id)
+      if (prev !== undefined && now - prev <= ttl) return false
+      seen.set(id, now)
+      lastAt = now
+      return true
+    }
+    if (now - lastAt < anonWindow) return false
+    lastAt = now
+    return true
+  }
+}
+
 // ---- v1 ----
-const server = async ({ directory }: any) => ({
-  event: async ({ event }: any) => {
+const server = async ({ directory }: any) => {
+  const claim = createPermissionGate()
+  const notifyPermission = (id: string | undefined) => {
     if (v2Active) return
-    if (event?.type === "session.idle") send("stop", directory, "")
-  },
-  "permission.ask": async () => {
-    if (v2Active) return
+    if (!claim(id)) return
     send("permission", directory, "")
-  },
-})
+  }
+  return {
+    event: async ({ event }: any) => {
+      if (v2Active) return
+      if (event?.type === "session.idle") {
+        send("stop", directory, "")
+        return
+      }
+      if (event?.type === "permission.asked") {
+        const props = event.properties ?? event.data
+        notifyPermission(permissionRequestId(props))
+      }
+    },
+    "permission.ask": async (input: any) => {
+      notifyPermission(permissionRequestId(input))
+    },
+  }
+}
 
 export default { id: "coding-agents-env", server, setup }

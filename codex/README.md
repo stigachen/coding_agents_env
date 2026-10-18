@@ -138,11 +138,14 @@ TUI 里 `/statusline` 也是改这个键）。`tui.toml` 里是要写进 `[tui]`
 
 1. `hooks.json`：按 `/hooks/notify.sh` 路径特征删掉自家旧条目再追加（旧版仓库
    布局的条目也能识别），其他 hook 原样保留；文件不存在则新建
-2. `config.toml`：改写前备份为 `config.toml.bak`。删掉自家的 `[hooks.state."…"]`
-   块（key 指向我们的槽位，或 hash 是我们的）和带标记的行，插入 `[tui]` 行和
-   `[features] hooks`，末尾追加新的信任块。python3 能真正执行脚本且 ≥ 3.11 时用
-   `tomllib` 校验，解析失败才回滚。Windows Store 的 `python3` 占位程序视为没有
-   Python，不把合法文件回滚掉
+2. `config.toml`：只有文件事先存在、且这一轮会改动它时，才把改写前的内容复制为
+   `config.toml.bak`。备份已存在就不再覆盖，所以重复安装不会把已经改过的配置
+   写成 `.bak`、把用户原件盖掉。原来没有 `config.toml` 时不创建备份（也不会留下
+   一份空的 `.bak`）。删掉自家的 `[hooks.state."…"]` 块（key 指向我们的槽位，或
+   hash 是我们的）和带标记的行，插入 `[tui]` 行和 `[features] hooks`，末尾追加新的
+   信任块。python3 能真正执行脚本且 ≥ 3.11 时用 `tomllib` 校验，解析失败才把文件
+   恢复成这一轮改写前的内容（`.bak` 仍是最早那份原件）。Windows Store 的
+   `python3` 占位程序视为没有 Python，不把合法文件回滚掉
 3. Windows（Git Bash）：hook 命令写成 Git Bash 的 `bash.exe` 绝对路径，脚本路径用
    `cygpath -m` 的 `C:/...` 形式，不用 PATH 里的 `bash`（那经常是 WSL 启动器）。
    找不到 Git Bash 时安装失败，可设置 `CLAUDE_CODE_GIT_BASH_PATH` 为 `bash.exe` 的
