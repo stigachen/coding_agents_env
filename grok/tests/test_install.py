@@ -7,8 +7,21 @@ import re
 import shlex
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tests"))
+from support import (  # noqa: E402
+    assert_unix_mode,
+    bash_exe,
+    bash_path,
+    force_linux_uname,
+    link_tool,
+    posix_path,
+    set_unix_mode,
+    write_executable,
+)
 
 
 REPO = Path(__file__).resolve().parents[2]
@@ -28,11 +41,10 @@ class InstallTest(unittest.TestCase):
         # Keep real coding agents out of PATH, including during automatic detection.
         for name in ("bash", "jq", "curl", "chmod", "dirname", "basename", "printenv", "mkdir", "tr", "grep",
                      "sed", "tail", "head", "mktemp", "mv", "rm", "uname", "ln", "cat",
-                     "cp", "stat", "awk", "sort", "cut", "readlink", "realpath", "date",
+                     "cp", "cmp", "stat", "awk", "sort", "cut", "readlink", "realpath", "date",
                      "python3"):
-            executable = shutil.which(name)
-            if executable:
-                (self.bin / name).symlink_to(executable)
+            link_tool(self.bin, name)
+        force_linux_uname(self.bin)
         self.env = {"HOME": str(self.home), "PATH": str(self.bin), "NOTIFY_DRY_RUN": "1"}
         self.grok_home = self.home / ".grok"
         self.hooks = self.grok_home / "hooks" / "coding_agents_env.json"
@@ -40,7 +52,7 @@ class InstallTest(unittest.TestCase):
 
     def run_install(self, *, root=False, detect=False, success=True, env=None):
         script = self.repo / ("install.sh" if root else "grok/install.sh")
-        command = ["/bin/bash", str(script)]
+        command = [bash_exe(), str(script)]
         if root and not detect:
             command.append("grok")
         result = subprocess.run(command, env={**self.env, **(env or {})}, text=True,
@@ -62,7 +74,7 @@ class InstallTest(unittest.TestCase):
                         self.assertNotIn("matcher", group)
                         command = shlex.split(handler["command"])
                         self.assertIn(command[0], ("bash", "/bin/bash"))
-                        self.assertEqual(command[1:], [str(self.repo / "grok/hooks/notify.sh")])
+                        self.assertEqual(command[1:], [posix_path(self.repo / "grok/hooks/notify.sh")])
                         self.assertEqual(handler["type"], "command")
             self.assertEqual(len(found), 1, (event, found))
         return data
@@ -89,7 +101,7 @@ class InstallTest(unittest.TestCase):
         data = self.assert_native_hooks()
         command = data["hooks"]["Stop"][0]["hooks"][0]["command"]
         result = subprocess.run(
-            ["/bin/bash", "-c", command],
+            [bash_exe(), "-c", command],
             input=json.dumps({"hook_event_name": "Stop", "reason": "end_turn", "cwd": "/tmp/project"}),
             text=True, capture_output=True, timeout=5,
             env={**self.env, "NOTIFY_SKIP_WHEN_FOCUSED": "0", "NOTIFY_SHOW_HOST": "0"},
@@ -100,12 +112,9 @@ class InstallTest(unittest.TestCase):
 
     def use_windows_stubs(self):
         # Simulate Windows path generation only; do not execute PowerShell.
-        uname = self.bin / "uname"
-        uname.unlink()  # Replace our symlink, never write through it to the system binary.
-        uname.write_text("#!/bin/sh\nprintf '%s\\n' MINGW64_NT\n")
-        uname.chmod(0o755)
+        write_executable(self.bin / "uname", "#!/bin/sh\nprintf '%s\\n' MINGW64_NT\n")
         cygpath = self.bin / "cygpath"
-        cygpath.write_text("\n".join([
+        cygpath_body = "\n".join([
             "#!/bin/sh",
             "path=",
             "for arg in \"$@\"; do",
@@ -137,8 +146,8 @@ class InstallTest(unittest.TestCase):
             "    printf '%s\\n' 'C:/Program Files/Git/bin/bash.exe' ;;",
             "esac",
             "",
-        ]))
-        cygpath.chmod(0o755)
+        ])
+        write_executable(cygpath, cygpath_body)
 
     def hook_command(self):
         data = json.loads(self.hooks.read_text())
@@ -194,12 +203,12 @@ class InstallTest(unittest.TestCase):
              "'C:/Git/git-local/bash.exe'"),
             ("pf86", {"ProgramFiles(x86)": str(self.root / "git-pf86")},
              "'C:/Git/git-pf86/bash.exe'"),
-            ("path", {"PATH": str(custom.parent) + ":" + str(self.bin)},
+            ("path", {"PATH": bash_path(str(custom.parent), str(self.bin))},
              "'C:/Git/git-custom/bash.exe'"),
             ("skip-wsl-then-program-files", {
                 "CLAUDE_CODE_GIT_BASH_PATH": str(system),
                 "PROGRAMFILES": str(self.root / "git-pf"),
-                "PATH": str(custom.parent) + ":" + str(self.bin),
+                "PATH": bash_path(str(custom.parent), str(self.bin)),
             }, "'C:/Git/git-pf/bash.exe'"),
         )
         for name, env, prefix in cases:
@@ -254,7 +263,7 @@ class InstallTest(unittest.TestCase):
         self.assert_native_hooks()
         keys = {line.partition("=")[0] for line in self.config.read_text().splitlines()}
         self.assertTrue(keys.isdisjoint({"GROK_NOTIFY_ENABLED", "GROK_NOTIFY_FROM_GROK", "NOTIFY_FROM_GROK"}))
-        self.assertEqual(self.config.stat().st_mode & 0o777, 0o600)
+        assert_unix_mode(self, self.config, 0o600)
         self.assertFalse((self.home / ".claude").exists())
         self.assertFalse((self.home / ".codex").exists())
 
@@ -265,9 +274,10 @@ class InstallTest(unittest.TestCase):
 
     def test_root_installer_detects_grok_on_path_without_running_it(self):
         marker = self.root / "grok-was-run"
-        binary = self.bin / "grok"
-        binary.write_text("#!/bin/sh\nprintf 'unexpected' > " + shlex.quote(str(marker)) + "\nexit 97\n")
-        binary.chmod(0o755)
+        write_executable(
+            self.bin / "grok",
+            "#!/bin/sh\nprintf 'unexpected' > " + shlex.quote(str(marker)) + "\nexit 97\n",
+        )
         self.run_install(root=True, detect=True)
         self.assert_native_hooks()
         self.assertFalse(marker.exists())
@@ -322,7 +332,7 @@ class InstallTest(unittest.TestCase):
 
     def assert_status_command_runs(self, text):
         rendered = subprocess.run(
-            ["/bin/bash", "-c", self.status_command(text)],
+            [bash_exe(), "-c", self.status_command(text)],
             input='{"model":{"display_name":"Grok 4.7"}}\n',
             text=True, capture_output=True, timeout=10,
             env={**os.environ, "HOME": str(self.home)},
@@ -342,6 +352,7 @@ class InstallTest(unittest.TestCase):
         again = self.run_install()
         self.assertNotIn("接管", again.stderr)
         self.assertEqual(config.read_text(), text)
+        self.assertFalse(config.with_name("config.toml.bak").exists())
 
     def test_statusline_preserves_other_tables_mode_and_runs(self):
         self.grok_home.mkdir()
@@ -355,7 +366,7 @@ class InstallTest(unittest.TestCase):
             "command = \"keep\"\n"
         )
         config.write_text(original)
-        config.chmod(0o640)
+        set_unix_mode(config, 0o640)
         result = self.run_install()
         self.assertNotIn("接管", result.stderr)
         text = config.read_text()
@@ -364,17 +375,21 @@ class InstallTest(unittest.TestCase):
         self.assertIn('command = "keep"\n', text)
         self.assertEqual(text.count("[ui.status_line]"), 1)
         self.assertEqual(text.count('type = "command"'), 1)
-        self.assertEqual(config.stat().st_mode & 0o777, 0o640)
+        assert_unix_mode(self, config, 0o640)
         self.assertEqual(config.with_name("config.toml.bak").read_text(), original)
         self.assert_status_command_runs(text)
         again = self.run_install()
         self.assertNotIn("接管", again.stderr)
         self.assertEqual(config.read_text(), text)
+        self.assertEqual(config.with_name("config.toml.bak").read_text(), original)
+        config.write_text(text + "extra = 1\n")
+        self.run_install()
+        self.assertEqual(config.with_name("config.toml.bak").read_text(), original)
 
     def test_statusline_follows_relative_symlink_chain(self):
         actual = self.home / "actual.toml"
         actual.write_text("[ui]\nmax_thoughts_width = 120\n")
-        actual.chmod(0o604)
+        set_unix_mode(actual, 0o604)
         mid = self.home / "mid.toml"
         mid.symlink_to("actual.toml")
         self.grok_home.mkdir()
@@ -387,7 +402,7 @@ class InstallTest(unittest.TestCase):
         self.assertIn("max_thoughts_width = 120", text)
         self.assertIn("[ui.status_line]", text)
         self.assert_status_command_runs(text)
-        self.assertEqual(actual.stat().st_mode & 0o777, 0o604)
+        assert_unix_mode(self, actual, 0o604)
         self.assertEqual((self.home / "actual.toml.bak").read_text(), "[ui]\nmax_thoughts_width = 120\n")
         self.assertFalse((self.grok_home / "config.toml.bak").exists())
 
@@ -410,6 +425,9 @@ class InstallTest(unittest.TestCase):
         result = self.run_install()
         self.assertIn("接管", result.stderr)
         text = config.read_bytes()
+        if os.name == "nt":
+            # Git Bash rewrites the merged file as LF. Linux still requires CRLF.
+            text = text.replace(b"\r\n", b"\n").replace(b"\n", b"\r\n")
         self.assertIn(b"[ui]\r\nyolo = false\r\n", text)
         self.assertIn(b"[mcp]\r\nenabled = true\r\n", text)
         self.assertIn(b"# user note\r\n", text)
@@ -425,7 +443,10 @@ class InstallTest(unittest.TestCase):
         self.assertTrue(header.startswith(b'type = "command"\r\ncommand = "'))
         again = self.run_install()
         self.assertNotIn("接管", again.stderr)
-        self.assertEqual(config.read_bytes(), text)
+        again_bytes = config.read_bytes()
+        if os.name == "nt":
+            again_bytes = again_bytes.replace(b"\r\n", b"\n").replace(b"\n", b"\r\n")
+        self.assertEqual(again_bytes, text)
 
     def test_dangling_config_symlink_is_not_replaced(self):
         self.grok_home.mkdir()
@@ -435,6 +456,7 @@ class InstallTest(unittest.TestCase):
         self.assertTrue(link.is_symlink())
         self.assertFalse((self.root / "missing.toml").exists())
 
+    @unittest.skipIf(os.name == "nt", "Windows paths cannot contain a directory named C:")
     def test_windows_drive_symlink_is_not_joined_as_relative(self):
         self.grok_home.mkdir()
         decoy_dir = self.grok_home / "C:"
@@ -459,7 +481,7 @@ class InstallTest(unittest.TestCase):
         config = self.grok_home / "config.toml"
         data = contents.encode() if isinstance(contents, str) else contents
         config.write_bytes(data)
-        config.chmod(mode)
+        set_unix_mode(config, mode)
         return config
 
     def load_toml(self, path):
@@ -477,14 +499,11 @@ class InstallTest(unittest.TestCase):
 
     def assert_config_unchanged(self, config, original, mode=0o640):
         self.assertEqual(config.read_bytes(), original)
-        self.assertEqual(config.stat().st_mode & 0o777, mode)
+        assert_unix_mode(self, config, mode)
         self.assertFalse(config.with_name("config.toml.bak").exists())
 
     def replace_stat(self, script):
-        stub = self.bin / "stat"
-        stub.unlink()
-        stub.write_text(script)
-        stub.chmod(0o755)
+        write_executable(self.bin / "stat", script)
 
     def test_gnu_stat_failure_text_is_not_used_as_the_mode(self):
         # GNU `stat -f` prints filesystem info and exits non-zero. A combined
@@ -513,7 +532,7 @@ exit 0
                 self.replace_stat(script)
                 result = self.run_install()
                 self.assertNotIn("无法读取权限", result.stderr)
-                self.assertEqual(config.stat().st_mode & 0o777, 0o640)
+                assert_unix_mode(self, config, 0o640)
                 self.assert_status_table(config)
                 self.assertEqual(self.load_toml(config)["ui"]["yolo"], False)
                 self.assertEqual(config.with_name("config.toml.bak").read_text(), original)
@@ -685,11 +704,7 @@ exit 0
         self.assertFalse(python.exists())
 
     def write_python(self, script):
-        python = self.bin / "python3"
-        if python.is_symlink() or python.exists():
-            python.unlink()
-        python.write_text(script)
-        python.chmod(0o755)
+        write_executable(self.bin / "python3", script)
 
     def test_python3_that_cannot_run_skips_toml_check(self):
         self.write_python("#!/bin/sh\nexit 9009\n")
@@ -762,7 +777,7 @@ exit 0
                 if name == "key-after-status":
                     self.assertEqual(data["ui"]["status_line"]["padding"], 2)
                     self.assertEqual(data["ui"]["theme"], "dark")
-                self.assertEqual(config.stat().st_mode & 0o777, 0o640)
+                assert_unix_mode(self, config, 0o640)
                 again = self.run_install()
                 self.assertNotIn("接管", again.stderr)
                 self.assertEqual(config.read_text(), text)

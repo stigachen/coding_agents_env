@@ -27,14 +27,16 @@
      （一行 export 指向仓库里的 `opencode/notify.ts`），其他插件不动
    - Codex：在 `~/.codex/hooks.json` 注册 Stop/PermissionRequest hooks；在
      `~/.codex/config.toml` 写入这两个 hook 的信任 hash（Codex 只执行已信任的
-     hook）、`[features] hooks = true`、`[tui]` 状态栏项（改写前备份为
-     `config.toml.bak`）。Windows 上 hook 命令用 Git Bash 的 `bash.exe` 绝对路径，
+     hook）、`[features] hooks = true`、`[tui]` 状态栏项。已有 `config.toml` 且
+     这一轮会改它时，首次把改写前的内容存为 `config.toml.bak`，重复安装不覆盖；
+     原来没有该文件则不创建备份。Windows 上 hook 命令用 Git Bash 的 `bash.exe` 绝对路径，
      信任键用 TOML 基本字符串（反斜杠按 TOML 规则转义）
    - Grok CLI：在 `${GROK_HOME:-$HOME/.grok}/hooks/coding_agents_env.json` 注册
      Stop / Notification hooks，直接指向仓库的 `grok/hooks/notify.sh`，无需 Claude。
      同时在 `config.toml` 写入 `[ui.status_line]` 的 `type` 和 `command`，指向
      `grok/statusline/statusline.sh`；其他表和键保留。无法安全改写时保留原文件并失败。
-     软链改目标，成功改写前备份为 `config.toml.bak`。不修改 Grok 的 `[compat.claude]`、第三方 hooks 或 Claude
+     软链改目标。已有 `config.toml` 且这一轮会改它时，首次把改写前的内容存为
+     `config.toml.bak`，重复安装不覆盖；原来没有该文件则不创建备份。不修改 Grok 的 `[compat.claude]`、第三方 hooks 或 Claude
      配置。Grok 默认仍合并 Claude 兼容 hooks，本仓库的 Claude 入口一律跳过 Grok
      事件，无论原生 hooks 是否已安装；从旧实现升级需要运行 `bash install.sh grok`。
      通知使用标准 `GROK_NOTIFY_ON_STOP` / `GROK_NOTIFY_ON_PERMISSION` /
@@ -132,7 +134,10 @@ jq 检查没有旧路径残留，以及 `~/.config/coding_agents_env/notify.env`
   - `install.sh` 合并 hooks.json、按 Codex 算法写入 hook 信任 hash、插入 `[tui]` 行。
     细节见 codex/README.md
 - `opencode/` — OpenCode：
-  - `notify.ts` 通知插件（v1/v2 两代插件 API 都支持；回合结束 / 等审批 / 执行失败）
+  - `notify.ts` 通知插件（v1/v2 两代插件 API 都支持；回合结束 / 等审批 / 执行失败）。
+    v1 等审批同时听 `permission.ask` hook 和事件总线的 `permission.asked`
+    （OpenCode 1.19 只发后者）；同一次审批按请求 id 只推一条。v2 仍走
+    `ctx.event.subscribe()`，激活后 v1 不再推送
   - `install.sh` 在 OpenCode 插件目录生成一行转发文件指向仓库。OpenCode 没有可
     配置的状态栏。细节见 opencode/README.md
 - `grok/` — Grok CLI：

@@ -8,7 +8,9 @@
 
 set -euo pipefail
 
-REPO_DIR="${REPO_DIR:-$(cd "$(dirname "$0")/.." && pwd)}"
+# dirname only splits on /. Git Bash started from Windows may see D:\...\script.sh.
+_self=${0//\\//}
+REPO_DIR="${REPO_DIR:-$(cd "$(dirname "$_self")/.." && pwd)}"
 . "$REPO_DIR/lib/runtime.sh"
 GROK_DIR="${GROK_HOME:-$HOME/.grok}"
 HOOK_DIR="$GROK_DIR/hooks"
@@ -51,7 +53,7 @@ resolve_file() {
     case "$link" in
       /*|[A-Za-z]:*) p=$link ;;
       *)
-        dir=$(cd "$(dirname "$p")" && pwd)
+        dir=$(cd "$(dirname "${p//\\//}")" && pwd)
         p="$dir/$link" ;;
     esac
     i=$((i + 1))
@@ -221,8 +223,15 @@ install_statusline() {
   require_toml "$sl_tmp" 0
   # Set the mode before rename. A failed chmod then leaves the original in place.
   chmod "$mode" "$sl_tmp"
-  cp "$config" "$config.bak"
-  mv "$sl_tmp" "$config"
+  # Keep the first pre-install copy. A later run must not replace it with the
+  # already merged file. Skip the copy when the bytes will not change, so a
+  # config this installer created (no user original) never grows a .bak.
+  if files_differ "$config" "$sl_tmp"; then
+    preserve_original_backup "$config"
+    mv "$sl_tmp" "$config"
+  else
+    rm -f "$sl_tmp"
+  fi
   sl_tmp=""
 }
 

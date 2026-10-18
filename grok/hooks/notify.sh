@@ -3,7 +3,9 @@
 # compatibility hooks are required. Never return a Stop/permission decision.
 
 input=$(cat)
-SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+# dirname only splits on /. Git Bash started from Windows may see D:\...\script.sh.
+_self=${BASH_SOURCE[0]//\\//}
+SCRIPT_DIR=$(cd "$(dirname "$_self")" && pwd)
 SEND="$SCRIPT_DIR/../../lib/send.sh"
 
 # Grok supplies camelCase fields and a Claude-compatible event-name alias.

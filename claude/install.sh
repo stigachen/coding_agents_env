@@ -8,7 +8,9 @@
 
 set -euo pipefail
 
-REPO_DIR="${REPO_DIR:-$(cd "$(dirname "$0")/.." && pwd)}"
+# dirname only splits on /. Git Bash started from Windows may see D:\...\script.sh.
+_self=${0//\\//}
+REPO_DIR="${REPO_DIR:-$(cd "$(dirname "$_self")/.." && pwd)}"
 CLAUDE_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 SETTINGS="$CLAUDE_DIR/settings.json"
 

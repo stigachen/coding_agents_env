@@ -9,7 +9,9 @@
 [ -z "${GROK_HOOK_EVENT:-}" ] || exit 0
 
 input=$(cat)
-SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+# dirname only splits on /. Git Bash started from Windows may see D:\...\script.sh.
+_self=${BASH_SOURCE[0]//\\//}
+SCRIPT_DIR=$(cd "$(dirname "$_self")" && pwd)
 SEND="$SCRIPT_DIR/../../lib/send.sh"
 
 event=$(echo "$input" | jq -r '.hook_event_name // empty')

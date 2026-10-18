@@ -4,8 +4,12 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tests"))
+from support import bash_exe  # noqa: E402
 
 
 HOOK = Path(__file__).resolve().parents[1] / "hooks" / "notify.sh"
@@ -44,7 +48,7 @@ class NotifyTest(unittest.TestCase):
         for key in omit:
             event.pop(key, None)
         result = subprocess.run(
-            ["/bin/bash", str(HOOK)], input=json.dumps(event),
+            [bash_exe(), str(HOOK)], input=json.dumps(event),
             text=True, capture_output=True, env=self.env, timeout=5,
         )
         self.assertEqual(result.returncode, 0, result.stderr)

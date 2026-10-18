@@ -13,7 +13,9 @@
 
 set -euo pipefail
 
-REPO_DIR="${REPO_DIR:-$(cd "$(dirname "$0")/.." && pwd)}"
+# dirname only splits on /. Git Bash started from Windows may see D:\...\script.sh.
+_self=${0//\\//}
+REPO_DIR="${REPO_DIR:-$(cd "$(dirname "$_self")/.." && pwd)}"
 . "$REPO_DIR/lib/runtime.sh"
 CODEX_HOME="${CODEX_HOME:-$HOME/.codex}"
 HOOKS="$CODEX_HOME/hooks.json"
@@ -37,7 +39,18 @@ TIMEOUT=30
 
 mkdir -p "$CODEX_HOME"
 [ -f "$HOOKS" ] || echo '{"hooks":{}}' > "$HOOKS"
-[ -f "$CONFIG" ] || : > "$CONFIG"
+# Snapshot a pre-existing config for rollback. An absent file is created empty
+# for the rewrite below, but that placeholder is not a user original and must
+# not become config.toml.bak.
+config_existed=0
+rollback=""
+if [ -f "$CONFIG" ]; then
+  config_existed=1
+  rollback=$(mktemp)
+  cp "$CONFIG" "$rollback"
+else
+  : > "$CONFIG"
+fi
 
 # Codex 记 hook 信任状态用的路径是 hooks.json 的绝对路径（Windows 下是原生路径）
 HOOKS_KEY_PATH=$(cd "$CODEX_HOME" && pwd -P)/hooks.json
@@ -46,8 +59,10 @@ case "$(uname)" in
 esac
 
 sha256() {
-  if command -v shasum >/dev/null 2>&1; then shasum -a 256 | cut -d' ' -f1
-  elif command -v sha256sum >/dev/null 2>&1; then sha256sum | cut -d' ' -f1
+  # Git Bash's shasum is a Perl script; perl is not part of Git for Windows.
+  # sha256sum is the native tool there and on Linux. macOS has shasum instead.
+  if command -v sha256sum >/dev/null 2>&1; then sha256sum | cut -d' ' -f1
+  elif command -v shasum >/dev/null 2>&1; then shasum -a 256 | cut -d' ' -f1
   else openssl dgst -sha256 | sed 's/.*= *//'
   fi
 }
@@ -104,7 +119,6 @@ done
 #   - [tui] 头后插入 codex/tui.toml 的行；[features] 里补 hooks = true
 tui_lines=$(grep -E '^[a-z_]+ *=' "$REPO_DIR/codex/tui.toml" | tr -d '\r' | sed "s/\$/  $MARK/")
 tui_keys=$(printf '%s\n' "$tui_lines" | sed 's/ *=.*//' | tr '\n' ' ')
-cp "$CONFIG" "$CONFIG.bak"
 # 多行值经 ENVIRON 传给 awk（BSD awk 的 -v 不接受含换行的字符串）
 export OUR_KEYS="$our_keys" OUR_HASHES="$our_hashes" TUI_LINES="$tui_lines"
 awk -v tui_keys="$tui_keys" -v mark="$MARK" '
@@ -200,11 +214,18 @@ END {
     awk -v mark="$MARK" '{ print } /^\[features\]/ { print "hooks = true  " mark }' "$CONFIG.tmp" > "$CONFIG.tmp2"
     mv "$CONFIG.tmp2" "$CONFIG.tmp"
   else
-    rm -f "$CONFIG.tmp"; echo "改写 $CONFIG 失败" >&2; exit 1
+    rm -f "$CONFIG.tmp" "$rollback"
+    echo "改写 $CONFIG 失败" >&2
+    exit 1
   fi
 }
 # 追加我们的信任块（放文件末尾；上面已删掉旧的同 key / 同 hash 块，不会重复定义）
 printf '%s' "$state_blocks" >> "$CONFIG.tmp"
+# 只在真正改写一份已经存在的配置时，把改写前的内容留下。bak 已存在则不动，
+# 这样第二次安装不会用已经改过的文件盖掉用户原件。原来没有 config.toml 时不备份。
+if [ "$config_existed" = "1" ] && files_differ "$CONFIG" "$CONFIG.tmp"; then
+  preserve_original_backup "$CONFIG"
+fi
 mv "$CONFIG.tmp" "$CONFIG"
 
 # 语法自检：python3 能真正执行脚本且带 tomllib 时才校验。Windows Store 的
@@ -223,13 +244,19 @@ PY
   rc=$?
   set -e
   if [ "$rc" -eq 1 ]; then
-    echo "⚠️  $CONFIG 不是合法 TOML，已回滚为 $CONFIG.bak" >&2
-    cp "$CONFIG.bak" "$CONFIG"
+    echo "⚠️  $CONFIG 不是合法 TOML，已恢复这一轮改写前的内容" >&2
+    if [ -n "$rollback" ] && [ -f "$rollback" ]; then
+      cp "$rollback" "$CONFIG"
+    elif [ "$config_existed" = "0" ]; then
+      rm -f "$CONFIG"
+    fi
+    rm -f "$rollback"
     exit 1
   fi
 fi
+rm -f "$rollback"
 
 echo "✅ Codex"
 echo "   Stop/PermissionRequest hooks → $REPO_DIR/codex/hooks/notify.sh（已写入信任 hash）"
 echo "   [tui] status_line            → 来自 codex/tui.toml"
-echo "   hooks.json / config.toml     → ${CODEX_HOME}（config.toml 改动前备份为 config.toml.bak）"
+echo "   hooks.json / config.toml     → ${CODEX_HOME}（已有 config.toml 时，首次改写前备份为 config.toml.bak，重复安装不覆盖）"

@@ -16,9 +16,13 @@ OpenCode 没有 shell 命令型 hook，事件只能通过插件拿。`notify.ts`
 不会为 subagent 的每一步推一条。OpenCode 没有 Claude 那种 idle 事件，所以
 没有 `idle`。
 
-插件同时带 v1（`server()` 返回 hooks 对象，`session.idle` / `permission.ask`）
-和 v2（`setup(ctx)` + `ctx.event.subscribe()`，OpenCode 2.x）两代 API 的实现，
-两种 loader 都认；v2 激活后 v1 的处理函数直接返回，不会重复推送。
+插件同时带 v1（`server()` 返回 hooks 对象）和 v2（`setup(ctx)` +
+`ctx.event.subscribe()`，OpenCode 2.x）两代 API。v1 的回合结束仍是
+`session.idle`。等审批则两条都听：旧版会调用 `permission.ask` hook；
+OpenCode 1.19.3 的 shell 工具走 Permission v1，只在事件总线上发布
+`permission.asked`（`event` hook 的 `event.type`），不再调用 `permission.ask`。
+若某个版本对同一次审批同时投递 hook 和事件，按请求 id 合成一条通知。
+v2 激活后 v1 的处理函数直接返回，不会重复推送。
 
 OpenCode 自带的 `attention` 设置（`~/.config/opencode/tui.json`：桌面通知、
 提示音，按 permission / question / done / error 分类）是本机偏好，不纳入仓库；
