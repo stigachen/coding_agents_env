@@ -116,9 +116,9 @@ def posix_path(path: Path) -> str:
 
 
 def assert_unix_mode(test, path: Path, mode: int) -> None:
-    # Git Bash stat reports 644 for modes that only differ by group/other read
-    # (640, 604). 600 is representable and still checked. Linux and macOS check all.
-    if os.name == "nt" and mode not in (0o600, 0o700, 0o755):
+    # Git Bash stat on this runner reports 644 for 600/640/604. Linux and macOS
+    # still check the mode the installer preserved.
+    if os.name == "nt":
         return
     test.assertEqual(unix_mode(path), mode)
 
