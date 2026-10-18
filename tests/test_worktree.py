@@ -120,6 +120,11 @@ class WorktreeTest(unittest.TestCase):
         self.assertEqual(self.index_mode("lib/runtime.sh"), "100644")
         self.assertEqual(self.index_mode("lib/send.sh"), "100755")
 
+    @unittest.skipIf(
+        os.name == "nt",
+        "Git for Windows does not track chmod under core.filemode=true; "
+        "filemode=false is the Windows default and is covered below",
+    )
     def test_filemode_true_install_leaves_a_clean_tree(self):
         self.git("config", "core.filemode", "true")
         self.run_install()

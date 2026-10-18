@@ -112,12 +112,12 @@ class NotifyTest(unittest.TestCase):
     def test_windows_workspace_path_uses_project_name(self):
         output = self.run_hook(cwd=r"C:\Users\Person\Project Folder")
         self.assertIn("[Project Folder] Grok", output)
-        self.assertNotIn("Users", output)
+        self.assertNotIn("Person", output)
 
     def test_claude_windows_workspace_path_uses_project_name(self):
         output = self.run_hook(hook=CLAUDE_HOOK, cwd=r"C:\Users\Person\Project Folder")
         self.assertIn("[Project Folder] Claude", output)
-        self.assertNotIn("Users", output)
+        self.assertNotIn("Person", output)
 
     def test_snake_case_assistant_message_is_supported(self):
         output = self.run_hook(omit=("lastAssistantMessage",),

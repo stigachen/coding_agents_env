@@ -59,8 +59,10 @@ case "$(uname)" in
 esac
 
 sha256() {
-  if command -v shasum >/dev/null 2>&1; then shasum -a 256 | cut -d' ' -f1
-  elif command -v sha256sum >/dev/null 2>&1; then sha256sum | cut -d' ' -f1
+  # Git Bash's shasum is a Perl script; perl is not part of Git for Windows.
+  # sha256sum is the native tool there and on Linux. macOS has shasum instead.
+  if command -v sha256sum >/dev/null 2>&1; then sha256sum | cut -d' ' -f1
+  elif command -v shasum >/dev/null 2>&1; then shasum -a 256 | cut -d' ' -f1
   else openssl dgst -sha256 | sed 's/.*= *//'
   fi
 }

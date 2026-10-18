@@ -91,6 +91,38 @@ def set_unix_mode(path: Path, mode: int) -> None:
     )
 
 
+def bash_path(*parts: str) -> str:
+    """Join PATH entries for Git Bash. Drive-letter colons are not separators."""
+    converted = []
+    for part in parts:
+        text = part.replace("\\", "/")
+        if os.name == "nt" and len(text) >= 2 and text[1] == ":":
+            text = "/" + text[0].lower() + text[2:]
+        converted.append(text)
+    return ":".join(converted)
+
+
+def posix_path(path: Path) -> str:
+    """Path as the Unix installer records it. Git Bash pwd/cygpath, not pathlib."""
+    if os.name != "nt":
+        return str(path)
+    result = subprocess.run(
+        [bash_exe(), "-c", 'cygpath -u "$1"', "p", str(path)],
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    return result.stdout.strip()
+
+
+def assert_unix_mode(test, path: Path, mode: int) -> None:
+    # Git Bash stat reports 644 for modes that only differ by group/other read
+    # (640, 604). 600 is representable and still checked. Linux and macOS check all.
+    if os.name == "nt" and mode not in (0o600, 0o700, 0o755):
+        return
+    test.assertEqual(unix_mode(path), mode)
+
+
 def unix_mode(path: Path) -> int:
     if os.name != "nt":
         return path.stat().st_mode & 0o777

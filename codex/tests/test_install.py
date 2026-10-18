@@ -10,7 +10,7 @@ import tomllib
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tests"))
-from support import bash_exe, force_linux_uname, link_tool, write_executable  # noqa: E402
+from support import bash_exe, force_linux_uname, link_tool, posix_path, write_executable  # noqa: E402
 
 
 REPO = Path(__file__).resolve().parents[2]
@@ -88,7 +88,7 @@ class InstallTest(unittest.TestCase):
         config_path = self.codex_home / "config.toml"
         hooks = json.loads(hooks_path.read_text())
         command = hooks["hooks"]["Stop"][0]["hooks"][0]["command"]
-        self.assertEqual(command, 'bash "' + str(REPO / "codex" / "hooks" / "notify.sh") + '"')
+        self.assertEqual(command, 'bash "' + posix_path(REPO / "codex" / "hooks" / "notify.sh") + '"')
         self.assertEqual(
             hooks["hooks"]["PermissionRequest"][0]["hooks"][0]["command"], command)
         text = config_path.read_text()

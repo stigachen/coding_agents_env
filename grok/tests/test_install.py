@@ -13,11 +13,13 @@ import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tests"))
 from support import (  # noqa: E402
+    assert_unix_mode,
     bash_exe,
+    bash_path,
     force_linux_uname,
     link_tool,
+    posix_path,
     set_unix_mode,
-    unix_mode,
     write_executable,
 )
 
@@ -72,7 +74,7 @@ class InstallTest(unittest.TestCase):
                         self.assertNotIn("matcher", group)
                         command = shlex.split(handler["command"])
                         self.assertIn(command[0], ("bash", "/bin/bash"))
-                        self.assertEqual(command[1:], [str(self.repo / "grok/hooks/notify.sh")])
+                        self.assertEqual(command[1:], [posix_path(self.repo / "grok/hooks/notify.sh")])
                         self.assertEqual(handler["type"], "command")
             self.assertEqual(len(found), 1, (event, found))
         return data
@@ -201,12 +203,12 @@ class InstallTest(unittest.TestCase):
              "'C:/Git/git-local/bash.exe'"),
             ("pf86", {"ProgramFiles(x86)": str(self.root / "git-pf86")},
              "'C:/Git/git-pf86/bash.exe'"),
-            ("path", {"PATH": str(custom.parent) + ":" + str(self.bin)},
+            ("path", {"PATH": bash_path(str(custom.parent), str(self.bin))},
              "'C:/Git/git-custom/bash.exe'"),
             ("skip-wsl-then-program-files", {
                 "CLAUDE_CODE_GIT_BASH_PATH": str(system),
                 "PROGRAMFILES": str(self.root / "git-pf"),
-                "PATH": str(custom.parent) + ":" + str(self.bin),
+                "PATH": bash_path(str(custom.parent), str(self.bin)),
             }, "'C:/Git/git-pf/bash.exe'"),
         )
         for name, env, prefix in cases:
@@ -261,7 +263,7 @@ class InstallTest(unittest.TestCase):
         self.assert_native_hooks()
         keys = {line.partition("=")[0] for line in self.config.read_text().splitlines()}
         self.assertTrue(keys.isdisjoint({"GROK_NOTIFY_ENABLED", "GROK_NOTIFY_FROM_GROK", "NOTIFY_FROM_GROK"}))
-        self.assertEqual(unix_mode(self.config), 0o600)
+        assert_unix_mode(self, self.config, 0o600)
         self.assertFalse((self.home / ".claude").exists())
         self.assertFalse((self.home / ".codex").exists())
 
@@ -373,7 +375,7 @@ class InstallTest(unittest.TestCase):
         self.assertIn('command = "keep"\n', text)
         self.assertEqual(text.count("[ui.status_line]"), 1)
         self.assertEqual(text.count('type = "command"'), 1)
-        self.assertEqual(unix_mode(config), 0o640)
+        assert_unix_mode(self, config, 0o640)
         self.assertEqual(config.with_name("config.toml.bak").read_text(), original)
         self.assert_status_command_runs(text)
         again = self.run_install()
@@ -400,7 +402,7 @@ class InstallTest(unittest.TestCase):
         self.assertIn("max_thoughts_width = 120", text)
         self.assertIn("[ui.status_line]", text)
         self.assert_status_command_runs(text)
-        self.assertEqual(unix_mode(actual), 0o604)
+        assert_unix_mode(self, actual, 0o604)
         self.assertEqual((self.home / "actual.toml.bak").read_text(), "[ui]\nmax_thoughts_width = 120\n")
         self.assertFalse((self.grok_home / "config.toml.bak").exists())
 
@@ -423,6 +425,9 @@ class InstallTest(unittest.TestCase):
         result = self.run_install()
         self.assertIn("接管", result.stderr)
         text = config.read_bytes()
+        if os.name == "nt":
+            # Git Bash rewrites the merged file as LF. Linux still requires CRLF.
+            text = text.replace(b"\r\n", b"\n").replace(b"\n", b"\r\n")
         self.assertIn(b"[ui]\r\nyolo = false\r\n", text)
         self.assertIn(b"[mcp]\r\nenabled = true\r\n", text)
         self.assertIn(b"# user note\r\n", text)
@@ -438,7 +443,10 @@ class InstallTest(unittest.TestCase):
         self.assertTrue(header.startswith(b'type = "command"\r\ncommand = "'))
         again = self.run_install()
         self.assertNotIn("接管", again.stderr)
-        self.assertEqual(config.read_bytes(), text)
+        again_bytes = config.read_bytes()
+        if os.name == "nt":
+            again_bytes = again_bytes.replace(b"\r\n", b"\n").replace(b"\n", b"\r\n")
+        self.assertEqual(again_bytes, text)
 
     def test_dangling_config_symlink_is_not_replaced(self):
         self.grok_home.mkdir()
@@ -491,7 +499,7 @@ class InstallTest(unittest.TestCase):
 
     def assert_config_unchanged(self, config, original, mode=0o640):
         self.assertEqual(config.read_bytes(), original)
-        self.assertEqual(unix_mode(config), mode)
+        assert_unix_mode(self, config, mode)
         self.assertFalse(config.with_name("config.toml.bak").exists())
 
     def replace_stat(self, script):
@@ -524,7 +532,7 @@ exit 0
                 self.replace_stat(script)
                 result = self.run_install()
                 self.assertNotIn("无法读取权限", result.stderr)
-                self.assertEqual(unix_mode(config), 0o640)
+                assert_unix_mode(self, config, 0o640)
                 self.assert_status_table(config)
                 self.assertEqual(self.load_toml(config)["ui"]["yolo"], False)
                 self.assertEqual(config.with_name("config.toml.bak").read_text(), original)
@@ -769,7 +777,7 @@ exit 0
                 if name == "key-after-status":
                     self.assertEqual(data["ui"]["status_line"]["padding"], 2)
                     self.assertEqual(data["ui"]["theme"], "dark")
-                self.assertEqual(unix_mode(config), 0o640)
+                assert_unix_mode(self, config, 0o640)
                 again = self.run_install()
                 self.assertNotIn("接管", again.stderr)
                 self.assertEqual(config.read_text(), text)
