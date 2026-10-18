@@ -2,6 +2,7 @@
 
 import os
 from pathlib import Path
+import shlex
 import shutil
 import subprocess
 
@@ -40,13 +41,17 @@ def link_tool(bin_dir: Path, name: str) -> None:
     if not executable:
         return
     target = Path(executable)
-    link = bin_dir / name
-    if not link.exists():
-        link.symlink_to(target)
-    if os.name == "nt" and not name.lower().endswith(".exe"):
-        exe = bin_dir / (name + ".exe")
-        if not exe.exists():
-            exe.symlink_to(target)
+    if os.name != "nt":
+        link = bin_dir / name
+        if not link.exists():
+            link.symlink_to(target)
+        return
+    # Symlinks or copies of Git's .exe fail to load msys-2.0.dll from the
+    # sandbox directory. A shell wrapper execs the real binary by absolute path.
+    write_executable(
+        bin_dir / name,
+        "#!/bin/sh\nexec " + shlex.quote(target.as_posix()) + ' "$@"\n',
+    )
 
 
 def force_linux_uname(bin_dir: Path) -> None:

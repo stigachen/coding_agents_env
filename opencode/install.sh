@@ -6,7 +6,9 @@
 
 set -euo pipefail
 
-REPO_DIR="${REPO_DIR:-$(cd "$(dirname "$0")/.." && pwd)}"
+# dirname only splits on /. Git Bash started from Windows may see D:\...\script.sh.
+_self=${0//\\//}
+REPO_DIR="${REPO_DIR:-$(cd "$(dirname "$_self")/.." && pwd)}"
 OC_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/opencode"
 PLUGIN_DIR="$OC_DIR/plugins"
 STUB="$PLUGIN_DIR/coding_agents_env.ts"

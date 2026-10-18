@@ -448,6 +448,7 @@ class InstallTest(unittest.TestCase):
         self.assertTrue(link.is_symlink())
         self.assertFalse((self.root / "missing.toml").exists())
 
+    @unittest.skipIf(os.name == "nt", "Windows paths cannot contain a directory named C:")
     def test_windows_drive_symlink_is_not_joined_as_relative(self):
         self.grok_home.mkdir()
         decoy_dir = self.grok_home / "C:"

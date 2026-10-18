@@ -8,7 +8,9 @@
 
 set -euo pipefail
 
-REPO_DIR="${REPO_DIR:-$(cd "$(dirname "$0")/.." && pwd)}"
+# dirname only splits on /. Git Bash started from Windows may see D:\...\script.sh.
+_self=${0//\\//}
+REPO_DIR="${REPO_DIR:-$(cd "$(dirname "$_self")/.." && pwd)}"
 . "$REPO_DIR/lib/runtime.sh"
 GROK_DIR="${GROK_HOME:-$HOME/.grok}"
 HOOK_DIR="$GROK_DIR/hooks"
@@ -51,7 +53,7 @@ resolve_file() {
     case "$link" in
       /*|[A-Za-z]:*) p=$link ;;
       *)
-        dir=$(cd "$(dirname "$p")" && pwd)
+        dir=$(cd "$(dirname "${p//\\//}")" && pwd)
         p="$dir/$link" ;;
     esac
     i=$((i + 1))

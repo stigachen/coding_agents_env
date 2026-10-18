@@ -20,7 +20,9 @@
 
 set -euo pipefail
 
-REPO_DIR=$(cd "$(dirname "$0")" && pwd)
+# dirname only splits on /. Git Bash started from Windows may see D:\...\script.sh.
+_self=${0//\\//}
+REPO_DIR=$(cd "$(dirname "$_self")" && pwd)
 export REPO_DIR
 CLAUDE_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 CONFIG_DIR="${CODING_AGENTS_ENV_DIR:-$HOME/.config/coding_agents_env}"

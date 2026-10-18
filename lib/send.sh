@@ -30,7 +30,9 @@ project=${2:-unknown}
 agent=${3:-Claude}
 body=$(cat)
 
-SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+# dirname only splits on /. Git Bash started from Windows may see D:\...\script.sh.
+_self=${BASH_SOURCE[0]//\\//}
+SCRIPT_DIR=$(cd "$(dirname "$_self")" && pwd)
 CLAUDE_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 CONFIG_DIR="${CODING_AGENTS_ENV_DIR:-$HOME/.config/coding_agents_env}"
 ENV_FILE="$CONFIG_DIR/notify.env"

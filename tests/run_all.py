@@ -5,9 +5,14 @@ Discovering the whole repository in one interpreter collides on test_install.py.
 Each directory is a separate process instead.
 """
 
+import os
 import subprocess
 import sys
 from pathlib import Path
+
+# Win32 Python otherwise decodes Git Bash UTF-8 (block characters, Chinese)
+# with the ANSI code page and crashes the reader thread.
+os.environ["PYTHONUTF8"] = "1"
 
 
 ROOT = Path(__file__).resolve().parents[1]

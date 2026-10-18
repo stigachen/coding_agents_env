@@ -62,6 +62,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          export PYTHONUTF8=1
           case "$(uname -s)" in
             MINGW*|MSYS*|CYGWIN*)
               # Win32 Python cannot CreateProcess the MSYS path /bin/bash.

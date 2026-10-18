@@ -13,7 +13,9 @@
 
 set -euo pipefail
 
-REPO_DIR="${REPO_DIR:-$(cd "$(dirname "$0")/.." && pwd)}"
+# dirname only splits on /. Git Bash started from Windows may see D:\...\script.sh.
+_self=${0//\\//}
+REPO_DIR="${REPO_DIR:-$(cd "$(dirname "$_self")/.." && pwd)}"
 . "$REPO_DIR/lib/runtime.sh"
 CODEX_HOME="${CODEX_HOME:-$HOME/.codex}"
 HOOKS="$CODEX_HOME/hooks.json"

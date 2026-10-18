@@ -1,5 +1,6 @@
 """install.sh must not dirty a fresh checkout, including on core.filemode=false."""
 
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -73,8 +74,11 @@ class WorktreeTest(unittest.TestCase):
                 set_unix_mode(path, 0o644)
 
     def git(self, *args, check=True):
+        # The sandbox git on Windows is a shell wrapper. CreateProcess needs
+        # the real git.exe; the installer still finds git through bash.
+        executable = shutil.which("git") if os.name == "nt" else "git"
         result = subprocess.run(
-            ["git", *args],
+            [executable or "git", *args],
             cwd=self.repo,
             env=self.env,
             text=True,
