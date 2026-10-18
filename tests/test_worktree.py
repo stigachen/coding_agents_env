@@ -3,8 +3,12 @@
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tests"))
+from support import bash_exe, force_linux_uname, link_tool, set_unix_mode  # noqa: E402
 
 
 REPO = Path(__file__).resolve().parents[1]
@@ -30,9 +34,8 @@ class WorktreeTest(unittest.TestCase):
             "mkdir", "tr", "grep", "sed", "awk", "mv", "rm", "cp", "uname", "cat",
             "ln", "head", "tail", "mktemp",
         ):
-            executable = shutil.which(name)
-            if executable:
-                (self.bin / name).symlink_to(executable)
+            link_tool(self.bin, name)
+        force_linux_uname(self.bin)
         gitconfig = self.root / "gitconfig"
         gitconfig.write_text("")
         self.env = {
@@ -67,7 +70,7 @@ class WorktreeTest(unittest.TestCase):
         # in that list; clearing its bit would stay dirty for an unrelated reason.
         for pattern in ("lib/*.sh", "*/hooks/*.sh", "*/statusline/*.sh", "*/install.sh"):
             for path in self.repo.glob(pattern):
-                path.chmod(0o644)
+                set_unix_mode(path, 0o644)
 
     def git(self, *args, check=True):
         result = subprocess.run(
@@ -84,7 +87,7 @@ class WorktreeTest(unittest.TestCase):
 
     def run_install(self):
         result = subprocess.run(
-            ["/bin/bash", str(self.repo / "install.sh")],
+            [bash_exe(), str(self.repo / "install.sh")],
             cwd=self.repo,
             env=self.env,
             text=True,
@@ -102,7 +105,7 @@ class WorktreeTest(unittest.TestCase):
     def is_executable(self, path):
         # Git Bash honors the Unix bit; os.access on Windows does not.
         result = subprocess.run(
-            ["/bin/bash", "-c", 'test -x "$1"', "bash", str(path)],
+            [bash_exe(), "-c", 'test -x "$1"', "bash", str(path)],
             env=self.env,
         )
         return result.returncode == 0
@@ -123,8 +126,8 @@ class WorktreeTest(unittest.TestCase):
 
     def test_filemode_false_restores_executable_scripts_only(self):
         self.git("config", "core.filemode", "false")
-        self.runtime.chmod(0o644)
-        self.send.chmod(0o644)
+        set_unix_mode(self.runtime, 0o644)
+        set_unix_mode(self.send, 0o644)
         self.run_install()
         self.assert_clean()
         self.assertFalse(self.is_executable(self.runtime))

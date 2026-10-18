@@ -4,8 +4,12 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tests"))
+from support import bash_exe  # noqa: E402
 
 
 REPO = Path(__file__).resolve().parents[2]
@@ -44,7 +48,7 @@ class NotifyTest(unittest.TestCase):
         for key in omit:
             payload.pop(key, None)
         result = subprocess.run(
-            ["/bin/bash", str(hook)], input=json.dumps(payload), text=True,
+            [bash_exe(), str(hook)], input=json.dumps(payload), text=True,
             capture_output=True, env={**self.env, **(env or {})}, timeout=5,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -240,7 +244,7 @@ class NotifyTest(unittest.TestCase):
             "GROK_DISCORD_WEBHOOK_URL": "", "GROK_DESKTOP_NOTIFY": "0",
         }
         result = subprocess.run(
-            ["/bin/bash", str(REPO / "lib/send.sh"), "stop", "test-project", "Grok"],
+            [bash_exe(), str(REPO / "lib/send.sh"), "stop", "test-project", "Grok"],
             input="debug-test", text=True, capture_output=True, env=environment, timeout=5,
         )
         self.assertEqual(result.returncode, 0, result.stderr)

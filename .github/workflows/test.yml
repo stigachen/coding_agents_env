@@ -60,4 +60,15 @@ jobs:
 
       - name: Run unit tests
         shell: bash
-        run: python3 tests/run_all.py
+        run: |
+          set -euo pipefail
+          case "$(uname -s)" in
+            MINGW*|MSYS*|CYGWIN*)
+              # Win32 Python cannot CreateProcess the MSYS path /bin/bash.
+              # Keep Git's usr/bin (cmp, awk, stat, …) on PATH in a form
+              # shutil.which can search after MSYS converts it for python.exe.
+              export TEST_BASH="$(cygpath -w "$(command -v bash)")"
+              export PATH="$(dirname "$(command -v cmp)"):$PATH"
+              ;;
+          esac
+          python3 tests/run_all.py

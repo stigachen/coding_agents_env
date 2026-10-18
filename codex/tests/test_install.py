@@ -3,11 +3,14 @@
 import json
 import os
 from pathlib import Path
-import shutil
 import subprocess
+import sys
 import tempfile
 import tomllib
 import unittest
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tests"))
+from support import bash_exe, force_linux_uname, link_tool, write_executable  # noqa: E402
 
 
 REPO = Path(__file__).resolve().parents[2]
@@ -27,9 +30,8 @@ class InstallTest(unittest.TestCase):
         for name in ("bash", "jq", "dirname", "mkdir", "tr", "grep", "sed", "head", "mktemp",
                      "mv", "rm", "uname", "cat", "cp", "cmp", "awk", "cut", "printenv", "shasum",
                      "sha256sum", "openssl", "python3"):
-            executable = shutil.which(name)
-            if executable:
-                (self.bin / name).symlink_to(executable)
+            link_tool(self.bin, name)
+        force_linux_uname(self.bin)
         self.env = {
             "HOME": str(self.home),
             "PATH": str(self.bin),
@@ -39,7 +41,7 @@ class InstallTest(unittest.TestCase):
 
     def run_install(self, *, success=True, env=None):
         result = subprocess.run(
-            ["/bin/bash", str(INSTALL)],
+            [bash_exe(), str(INSTALL)],
             env={**self.env, **(env or {})}, text=True, capture_output=True, timeout=20,
         )
         if success:
@@ -49,12 +51,8 @@ class InstallTest(unittest.TestCase):
         return result
 
     def use_windows_stubs(self):
-        uname = self.bin / "uname"
-        uname.unlink()
-        uname.write_text("#!/bin/sh\nprintf '%s\\n' MINGW64_NT\n")
-        uname.chmod(0o755)
-        cygpath = self.bin / "cygpath"
-        cygpath.write_text("\n".join([
+        write_executable(self.bin / "uname", "#!/bin/sh\nprintf '%s\\n' MINGW64_NT\n")
+        cygpath_body = "\n".join([
             "#!/bin/sh",
             "path=",
             "for arg in \"$@\"; do",
@@ -78,15 +76,11 @@ class InstallTest(unittest.TestCase):
             "    printf '%s\\n' 'C:/Program Files/Git/bin/bash.exe' ;;",
             "esac",
             "",
-        ]))
-        cygpath.chmod(0o755)
+        ])
+        write_executable(self.bin / "cygpath", cygpath_body)
 
     def write_python(self, script):
-        python = self.bin / "python3"
-        if python.is_symlink() or python.exists():
-            python.unlink()
-        python.write_text(script)
-        python.chmod(0o755)
+        write_executable(self.bin / "python3", script)
 
     def test_unix_install_is_idempotent(self):
         self.run_install()

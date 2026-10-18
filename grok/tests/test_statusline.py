@@ -4,7 +4,11 @@ import json
 from pathlib import Path
 import re
 import subprocess
+import sys
 import unittest
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tests"))
+from support import bash_exe  # noqa: E402
 
 
 REPO = Path(__file__).resolve().parents[2]
@@ -17,7 +21,7 @@ class StatuslineTest(unittest.TestCase):
         if payload is not None:
             raw = json.dumps(payload)
         result = subprocess.run(
-            ["/bin/bash", str(SCRIPT)],
+            [bash_exe(), str(SCRIPT)],
             input=raw, text=True, capture_output=True, timeout=10,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
