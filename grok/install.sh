@@ -86,8 +86,9 @@ write_status_wrapper() {
   esac
   mkdir -p "$GROK_DIR"
   printf '%s\r\n' '@echo off' "\"${bash_w}\" \"${script_w}\"" > "$dest"
-  # pwd -W is Git Bash. It prints a Windows path the status line can start.
-  wrapper_dir=$(cd "$GROK_DIR" && pwd -W)
+  # pwd -W is Git Bash and prints a Windows path. Linux and macOS bash,
+  # including CI that only stubs uname, reject -W; use the logical path there.
+  wrapper_dir=$(cd "$GROK_DIR" && { pwd -W 2>/dev/null || pwd; })
   wrapper_dir=${wrapper_dir//\\//}
   printf '%s' "${wrapper_dir}/coding_agents_env-statusline.cmd"
 }

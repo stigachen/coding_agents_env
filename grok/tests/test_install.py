@@ -169,13 +169,15 @@ class InstallTest(unittest.TestCase):
         config = self.grok_home / "config.toml"
         wrapper = self.grok_home / "coding_agents_env-statusline.cmd"
         self.assertTrue(wrapper.is_file())
-        wrapper_text = wrapper.read_text(encoding="utf-8")
+        # read_text() translates \r\n to \n, so check the bytes the installer wrote.
+        wrapper_text = wrapper.read_bytes().decode("utf-8")
         self.assertIn('"C:/Git/git-preferred/bash.exe"', wrapper_text)
         self.assertIn(
             "\"C:/Users/O'Brien/project/grok/statusline/statusline.sh\"",
             wrapper_text,
         )
         self.assertTrue(wrapper_text.endswith("\r\n"))
+        self.assertNotIn("\n", wrapper_text.replace("\r\n", ""))
         first_text = config.read_text()
         self.assertIn(
             'command = "' + wrapper.as_posix() + '"',
