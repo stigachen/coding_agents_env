@@ -67,18 +67,44 @@ resolve_file() {
 
 notify_target="$REPO_DIR/grok/hooks/notify.sh"
 status_target="$REPO_DIR/grok/statusline/statusline.sh"
+
+# Windows status command is this file's path and nothing else. Grok starts
+# that path as the program. The file calls Git Bash on statusline.sh.
+write_status_wrapper() {
+  local bash_exe=$1 script=$2 dest bash_w script_w wrapper_dir
+  dest="$GROK_DIR/coding_agents_env-statusline.cmd"
+  bash_w=$(cygpath -w "$bash_exe")
+  script_w=$(cygpath -w "$script")
+  # cmd expands %VAR% while it reads the line. A path percent must be doubled.
+  bash_w=${bash_w//%/%%}
+  script_w=${script_w//%/%%}
+  # A quote would close the wrapper's quotes. & | < > ^ stay literal inside them.
+  case "${bash_w}${script_w}" in
+    *\"*)
+      echo "Grok status line: bash or script path contains a quote, wrapper not written" >&2
+      exit 1 ;;
+  esac
+  mkdir -p "$GROK_DIR"
+  printf '%s\r\n' '@echo off' "\"${bash_w}\" \"${script_w}\"" > "$dest"
+  # pwd -W is Git Bash. It prints a Windows path the status line can start.
+  wrapper_dir=$(cd "$GROK_DIR" && pwd -W)
+  wrapper_dir=${wrapper_dir//\\//}
+  printf '%s' "${wrapper_dir}/coding_agents_env-statusline.cmd"
+}
+
 case "$(uname)" in
   MINGW*|MSYS*|CYGWIN*)
     # Quote Git Bash's bash.exe. PATH bash on Windows is usually the WSL launcher.
     # Grok's hook runner inserts & before a quoted program path that has
     # arguments, so the hook command stays without a call operator.
-    # The status line runs the command as written. PowerShell needs & there.
+    # The status line starts `command` as the program name. A leading & or
+    # quotes stay in that name, and Windows returns os error 123. A .cmd path
+    # has neither; Windows starts .cmd itself, and the wrapper calls Git Bash.
     bash_exe=$(require_git_bash) || exit 1
     bash_quoted=$(shell_single_quote "$bash_exe")
     notify_quoted=$(shell_single_quote "$notify_target")
-    status_quoted=$(shell_single_quote "$status_target")
     NOTIFY_CMD="'$bash_quoted' '$notify_quoted'"
-    status_cmd="& '$bash_quoted' '$status_quoted'"
+    status_cmd=$(write_status_wrapper "$bash_exe" "$status_target")
     ;;
   *)
     notify_quoted=$(shell_single_quote "$notify_target")
@@ -162,7 +188,10 @@ if not isinstance(status, dict):
 command = status.get("command")
 if status.get("type") != "command" or not isinstance(command, str):
     sys.exit(2)
-if "/grok/statusline/statusline.sh" not in command:
+if (
+    "/grok/statusline/statusline.sh" not in command
+    and "coding_agents_env-statusline.cmd" not in command
+):
     sys.exit(2)
 PY
 }

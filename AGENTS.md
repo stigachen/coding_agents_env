@@ -41,9 +41,12 @@
      事件，无论原生 hooks 是否已安装；从旧实现升级需要运行 `bash install.sh grok`。
      通知使用标准 `GROK_NOTIFY_ON_STOP` / `GROK_NOTIFY_ON_PERMISSION` /
      `GROK_NOTIFY_ON_IDLE` 覆盖公共 `NOTIFY_ON_*`，没有额外总开关。状态栏表在
-     下次启动 Grok 时加载。Windows 上 hook 与状态栏命令写 Git Bash 的 `bash.exe`
-     绝对路径；找不到则安装失败，不写一条会静默失败的 `bash` 命令。状态栏命令
-     另加 PowerShell 调用运算符 `&`；hook 命令不加，Grok 自己会补
+     下次启动 Grok 时加载。Windows 上 hook 命令写 Git Bash 的 `bash.exe`
+     绝对路径；找不到则安装失败，不写一条会静默失败的 `bash` 命令。状态栏
+     `command` 只写 `~/.grok/coding_agents_env-statusline.cmd` 的绝对路径，
+     不加引号和 `&`（Grok 会把整段当成程序名，引号会触发 os error 123）。
+     这个 `.cmd` 再调用 `bash.exe` 执行 `statusline.sh`。hook 命令不加 `&`，
+     Grok 自己会补
 2. **交互式收集通知渠道配置**。检查 `~/.config/coding_agents_env/notify.env`：
    若没有任何渠道键填了值，在对话中询问用户。判断命令（有输出即视为已配置，
    通用键和 `CLAUDE_` / `CODEX_` / `OPENCODE_` / `GROK_` 前缀键都算）：
@@ -85,8 +88,9 @@
      `agent=OpenCode kind=stop` 一行
    - 装了 Grok 的机器：`jq . "${GROK_HOME:-$HOME/.grok}/hooks/coding_agents_env.json"`
      合法且含指向本仓库 `grok/hooks/notify.sh` 的 Stop / Notification 条目。
-     `grep grok/statusline/statusline.sh "${GROK_HOME:-$HOME/.grok}/config.toml"`
-     能看到状态栏命令。状态栏冒烟：
+     Windows 上 `grep coding_agents_env-statusline.cmd "${GROK_HOME:-$HOME/.grok}/config.toml"`
+     能看到状态栏命令；其他系统这条命令里仍有 `grok/statusline/statusline.sh`。
+     状态栏冒烟：
      `echo '{"model":{"display_name":"Test"},"effort":{"level":"high"},"workspace":{"current_dir":"'$HOME'","branch":"main"},"context_window":{"used_percentage":42},"cost":{"total_cost_usd":1.23}}' | bash grok/statusline/statusline.sh`
      按 `grok/README.md` 的隔离 dry-run 检查 `end_turn`、`permission_prompt`、
      `idle_prompt`，包括子 agent 待审批仍通知、子 agent Stop / idle 和退出会话

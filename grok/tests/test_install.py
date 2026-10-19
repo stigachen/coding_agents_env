@@ -167,9 +167,21 @@ class InstallTest(unittest.TestCase):
                 self.assertEqual(data["hooks"][event][0]["hooks"][0]["command"], expected)
                 self.assertNotIn("matcher", data["hooks"][event][0])
         config = self.grok_home / "config.toml"
-        status = "& 'C:/Git/git-preferred/bash.exe' 'C:/Users/O''Brien/project/grok/statusline/statusline.sh'"
+        wrapper = self.grok_home / "coding_agents_env-statusline.cmd"
+        self.assertTrue(wrapper.is_file())
+        wrapper_text = wrapper.read_text(encoding="utf-8")
+        self.assertIn('"C:/Git/git-preferred/bash.exe"', wrapper_text)
+        self.assertIn(
+            "\"C:/Users/O'Brien/project/grok/statusline/statusline.sh\"",
+            wrapper_text,
+        )
+        self.assertTrue(wrapper_text.endswith("\r\n"))
         first_text = config.read_text()
-        self.assertIn('command = "' + status + '"', first_text)
+        self.assertIn(
+            'command = "' + wrapper.as_posix() + '"',
+            first_text,
+        )
+        self.assertNotIn("&", first_text)
         again = self.run_install(env=env)
         self.assertNotIn("接管", again.stderr)
         self.assertEqual(config.read_text(), first_text)

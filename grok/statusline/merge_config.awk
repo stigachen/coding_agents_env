@@ -359,7 +359,8 @@ function schedule_replace(start_line, vL, vC, endL, endC, new_value, indent, kra
 }
 
 function note_command_raw(raw) {
-  if (index(raw, marker) > 0) ours = 1
+  if (index(raw, marker) > 0 || index(raw, "coding_agents_env-statusline.cmd") > 0)
+    ours = 1
 }
 
 function note_form(form) {
