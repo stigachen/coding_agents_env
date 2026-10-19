@@ -179,11 +179,15 @@ class InstallTest(unittest.TestCase):
         self.assertTrue(wrapper_text.endswith("\r\n"))
         self.assertNotIn("\n", wrapper_text.replace("\r\n", ""))
         first_text = config.read_text()
-        self.assertIn(
-            'command = "' + wrapper.as_posix() + '"',
-            first_text,
-        )
-        self.assertNotIn("&", first_text)
+        # pwd -W expands an 8.3 directory such as RUNNER~1 to its long name.
+        # Python keeps the spelling it was given. Both names are this file.
+        match = re.search(r'(?m)^command = "(.*)"$', first_text)
+        self.assertIsNotNone(match, first_text)
+        command = match.group(1)
+        self.assertTrue(os.path.samefile(command, wrapper), (command, wrapper))
+        self.assertNotIn("&", command)
+        self.assertNotIn('"', command)
+        self.assertNotIn("'", command)
         again = self.run_install(env=env)
         self.assertNotIn("接管", again.stderr)
         self.assertEqual(config.read_text(), first_text)
