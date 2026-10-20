@@ -184,6 +184,7 @@ class InstallTest(unittest.TestCase):
         )
         self.assertTrue(wrapper_text.endswith("\r\n"))
         self.assertNotIn("\n", wrapper_text.replace("\r\n", ""))
+        self.assertNotIn("chcp", wrapper_text)
         first_text = config.read_text()
         # pwd -W expands an 8.3 directory such as RUNNER~1 to its long name.
         # Python keeps the spelling it was given. Both names are this file.
