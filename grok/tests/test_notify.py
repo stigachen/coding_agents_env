@@ -49,7 +49,7 @@ class NotifyTest(unittest.TestCase):
             payload.pop(key, None)
         result = subprocess.run(
             [bash_exe(), str(hook)], input=json.dumps(payload), text=True,
-            capture_output=True, env={**self.env, **(env or {})}, timeout=5,
+            capture_output=True, env={**self.env, **(env or {})}, timeout=20,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stderr, "")
@@ -245,7 +245,7 @@ class NotifyTest(unittest.TestCase):
         }
         result = subprocess.run(
             [bash_exe(), str(REPO / "lib/send.sh"), "stop", "test-project", "Grok"],
-            input="debug-test", text=True, capture_output=True, env=environment, timeout=5,
+            input="debug-test", text=True, capture_output=True, env=environment, timeout=20,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stderr, "")

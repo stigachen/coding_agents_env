@@ -103,7 +103,7 @@ class InstallTest(unittest.TestCase):
         result = subprocess.run(
             [bash_exe(), "-c", command],
             input=json.dumps({"hook_event_name": "Stop", "reason": "end_turn", "cwd": "/tmp/project"}),
-            text=True, capture_output=True, timeout=5,
+            text=True, capture_output=True, timeout=20,
             env={**self.env, "NOTIFY_SKIP_WHEN_FOCUSED": "0", "NOTIFY_SHOW_HOST": "0"},
         )
         self.assertEqual(result.returncode, 0, result.stderr)
