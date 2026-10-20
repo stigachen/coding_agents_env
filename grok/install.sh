@@ -16,6 +16,17 @@ GROK_DIR="${GROK_HOME:-$HOME/.grok}"
 HOOK_DIR="$GROK_DIR/hooks"
 HOOKS="$HOOK_DIR/coding_agents_env.json"
 CONFIG_LINK="$GROK_DIR/config.toml"
+# One name for the Windows wrapper, the awk "ours" marker, and the TOML check.
+STATUS_WRAPPER_NAME=coding_agents_env-statusline.cmd
+export STATUS_WRAPPER_NAME
+tmp=""
+sl_tmp=""
+STATUS_WRAPPER_TMP=""
+cleanup() {
+  rm -f ${tmp:+"$tmp"} ${tmp:+"$tmp.merged"} ${sl_tmp:+"$sl_tmp"} \
+    ${STATUS_WRAPPER_TMP:+"$STATUS_WRAPPER_TMP"}
+}
+trap cleanup EXIT
 
 # Quote a path for inclusion in bash '...' (POSIX) or PowerShell (Windows).
 # The substitution must stay outside double quotes; quoting it changes the
@@ -70,27 +81,42 @@ status_target="$REPO_DIR/grok/statusline/statusline.sh"
 
 # Windows status command is this file's path and nothing else. Grok starts
 # that path as the program. The file calls Git Bash on statusline.sh.
-write_status_wrapper() {
-  local bash_exe=$1 script=$2 dest bash_w script_w wrapper_dir
-  dest="$GROK_DIR/coding_agents_env-statusline.cmd"
+# The body is staged beside the destination and published only after the
+# config merge succeeds, so a failed install does not replace a wrapper
+# cmd.exe may still be reading.
+prepare_status_wrapper() {
+  local bash_exe=$1 script=$2 dest bash_w script_w
+  dest="$GROK_DIR/$STATUS_WRAPPER_NAME"
   bash_w=$(cygpath -w "$bash_exe")
   script_w=$(cygpath -w "$script")
   # cmd expands %VAR% while it reads the line. A path percent must be doubled.
   bash_w=${bash_w//%/%%}
   script_w=${script_w//%/%%}
-  # A quote would close the wrapper's quotes. & | < > ^ stay literal inside them.
-  case "${bash_w}${script_w}" in
-    *\"*)
-      echo "Grok status line: bash or script path contains a quote, wrapper not written" >&2
-      exit 1 ;;
-  esac
   mkdir -p "$GROK_DIR"
-  printf '%s\r\n' '@echo off' "\"${bash_w}\" \"${script_w}\"" > "$dest"
-  # pwd -W is Git Bash and prints a Windows path. Linux and macOS bash,
-  # including CI that only stubs uname, reject -W; use the logical path there.
-  wrapper_dir=$(cd "$GROK_DIR" && { pwd -W 2>/dev/null || pwd; })
-  wrapper_dir=${wrapper_dir//\\//}
-  printf '%s' "${wrapper_dir}/coding_agents_env-statusline.cmd"
+  STATUS_WRAPPER_TMP=$(mktemp "$GROK_DIR/.$STATUS_WRAPPER_NAME.XXXXXX")
+  {
+    printf '%s\r\n' '@echo off'
+    # cmd reads a batch file in the OEM code page. chcp applies to the next
+    # line, so a UTF-8 path is not decoded as GBK.
+    printf '%s\r\n' 'chcp 65001>nul'
+    printf '%s\r\n' "\"${bash_w}\" \"${script_w}\""
+  } > "$STATUS_WRAPPER_TMP"
+  # cygpath -m is Git Bash, MSYS, and Cygwin. pwd -W is not.
+  # Set globals here. A command substitution would drop them.
+  STATUS_CMD_PATH=$(cygpath -m "$dest")
+}
+
+publish_status_wrapper() {
+  local dest
+  [ -n "$STATUS_WRAPPER_TMP" ] || return 0
+  dest="$GROK_DIR/$STATUS_WRAPPER_NAME"
+  if [ -f "$dest" ] && ! files_differ "$STATUS_WRAPPER_TMP" "$dest"; then
+    rm -f "$STATUS_WRAPPER_TMP"
+    STATUS_WRAPPER_TMP=""
+    return 0
+  fi
+  mv -f "$STATUS_WRAPPER_TMP" "$dest"
+  STATUS_WRAPPER_TMP=""
 }
 
 case "$(uname)" in
@@ -105,7 +131,8 @@ case "$(uname)" in
     bash_quoted=$(shell_single_quote "$bash_exe")
     notify_quoted=$(shell_single_quote "$notify_target")
     NOTIFY_CMD="'$bash_quoted' '$notify_quoted'"
-    status_cmd=$(write_status_wrapper "$bash_exe" "$status_target")
+    prepare_status_wrapper "$bash_exe" "$status_target"
+    status_cmd=$STATUS_CMD_PATH
     ;;
   *)
     notify_quoted=$(shell_single_quote "$notify_target")
@@ -120,8 +147,6 @@ export STATUSLINE_TOML
 
 mkdir -p "$HOOK_DIR"
 tmp=$(mktemp "$HOOK_DIR/.coding_agents_env.XXXXXX")
-sl_tmp=""
-trap 'rm -f "$tmp" "$tmp.merged" ${sl_tmp:+"$sl_tmp"}' EXIT
 if [ -e "$HOOKS" ]; then
   jq -e -s 'length == 1 and (.[0] | type == "object" and ((.hooks // {}) | type == "object"))' "$HOOKS" >/dev/null
   cat "$HOOKS" > "$tmp"
@@ -171,7 +196,7 @@ read_mode() {
 toml_check() {
   local file=$1
   python3_runs || return 0
-  python3 - "$file" <<'PY'
+  python3 - "$file" "$STATUS_WRAPPER_NAME" <<'PY'
 import sys
 try:
     import tomllib
@@ -189,10 +214,8 @@ if not isinstance(status, dict):
 command = status.get("command")
 if status.get("type") != "command" or not isinstance(command, str):
     sys.exit(2)
-if (
-    "/grok/statusline/statusline.sh" not in command
-    and "coding_agents_env-statusline.cmd" not in command
-):
+wrapper = sys.argv[2]
+if "/grok/statusline/statusline.sh" not in command and wrapper not in command:
     sys.exit(2)
 PY
 }
@@ -266,10 +289,11 @@ install_statusline() {
 }
 
 install_statusline
+publish_status_wrapper
 
 printf '%s\n' \
   'Grok: native Stop/Notification hooks installed' \
   "   $HOOKS -> $notify_target" \
   'Grok: status line installed' \
-  "   $CONFIG_LINK -> $status_target" \
+  "   $CONFIG_LINK -> $status_cmd" \
   '   restart Grok to load [ui.status_line]'

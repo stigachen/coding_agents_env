@@ -9,7 +9,7 @@ type = "command"
 command = "bash '/绝对路径/grok/statusline/statusline.sh'"
 ```
 
-Windows 上 `command` 只是 `~/.grok/coding_agents_env-statusline.cmd` 的绝对路径，
+Windows 上 `command` 只是 `${GROK_HOME:-$HOME/.grok}/coding_agents_env-statusline.cmd` 的绝对路径，
 没有引号，也没有参数。Grok 把这一整段当成程序名来启动。引号或前导 `&` 会留在
 文件名里，Windows 返回 os error 123。这个 `.cmd` 再调用 Git Bash 执行上面的
 脚本。Hook 命令不加 `&`，由 Grok 自己补。

@@ -142,6 +142,8 @@ class InstallTest(unittest.TestCase):
             "    printf '%s\\n' 'C:/Git/git-local/bash.exe' ;;",
             "  *git-pf*)",
             "    printf '%s\\n' 'C:/Git/git-pf/bash.exe' ;;",
+            "  *coding_agents_env-statusline.cmd*)",
+            "    printf '%s\\n' \"$path\" ;;",
             "  *)",
             "    printf '%s\\n' 'C:/Program Files/Git/bin/bash.exe' ;;",
             "esac",
@@ -192,6 +194,27 @@ class InstallTest(unittest.TestCase):
         self.assertNotIn("接管", again.stderr)
         self.assertEqual(config.read_text(), first_text)
         self.assertEqual(json.loads(self.hooks.read_text()), data)
+
+    def test_windows_status_command_keeps_a_path_with_spaces(self):
+        self.use_windows_stubs()
+        bash_exe = self.root / "git-preferred" / "bash.exe"
+        bash_exe.parent.mkdir()
+        bash_exe.write_text("")
+        grok_home = self.home / "Grok Home"
+        self.run_install(env={
+            "CLAUDE_CODE_GIT_BASH_PATH": str(bash_exe),
+            "GROK_HOME": str(grok_home),
+        })
+        wrapper = grok_home / "coding_agents_env-statusline.cmd"
+        self.assertTrue(wrapper.is_file())
+        text = (grok_home / "config.toml").read_text()
+        match = re.search(r'(?m)^command = "(.*)"$', text)
+        self.assertIsNotNone(match, text)
+        command = match.group(1)
+        self.assertIn("Grok Home", command)
+        self.assertNotIn('"', command)
+        self.assertNotIn("&", command)
+        self.assertTrue(os.path.samefile(command, wrapper), (command, wrapper))
 
     def test_windows_git_bash_search_skips_system32(self):
         self.use_windows_stubs()

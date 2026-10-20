@@ -10,6 +10,7 @@
 BEGIN {
   cmd = ENVIRON["STATUSLINE_TOML"]
   marker = "/grok/statusline/statusline.sh"
+  wrapper_name = ENVIRON["STATUS_WRAPPER_NAME"]
   SL = "ui\034status_line"
   if (cmd == "") {
     print "Grok config.toml 无法安全合并 [ui.status_line]：缺少命令。原文件未修改" > "/dev/stderr"
@@ -359,8 +360,8 @@ function schedule_replace(start_line, vL, vC, endL, endC, new_value, indent, kra
 }
 
 function note_command_raw(raw) {
-  if (index(raw, marker) > 0 || index(raw, "coding_agents_env-statusline.cmd") > 0)
-    ours = 1
+  if (index(raw, marker) > 0) ours = 1
+  if (wrapper_name != "" && index(raw, wrapper_name) > 0) ours = 1
 }
 
 function note_form(form) {

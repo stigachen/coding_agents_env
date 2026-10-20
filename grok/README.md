@@ -97,7 +97,7 @@ Windows 上 hook 和状态栏命令写成 Git Bash 的 `bash.exe` 绝对路径�
 失败。Hook 命令不加 PowerShell 的 `&`：Grok 会给「引号里的程序路径，后面还有
 参数」自行补上调用运算符。状态栏不会补，而且会把 `command` 整段当成程序名。
 引号和前导 `&` 会留在文件名里，Windows 返回 os error 123。安装器因此在
-`~/.grok/coding_agents_env-statusline.cmd` 写一个包装，`command` 只放这个
+`${GROK_HOME:-$HOME/.grok}/coding_agents_env-statusline.cmd` 写一个包装，`command` 只放这个
 `.cmd` 的绝对路径。包装里再调用 Git Bash 执行 `statusline.sh`。已安装的机器
 需要重跑 `bash install.sh grok`，旧命令才会换成这条路径；状态栏表仍在下次启动
 Grok 时加载。

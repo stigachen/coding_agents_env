@@ -43,7 +43,7 @@
      `GROK_NOTIFY_ON_IDLE` 覆盖公共 `NOTIFY_ON_*`，没有额外总开关。状态栏表在
      下次启动 Grok 时加载。Windows 上 hook 命令写 Git Bash 的 `bash.exe`
      绝对路径；找不到则安装失败，不写一条会静默失败的 `bash` 命令。状态栏
-     `command` 只写 `~/.grok/coding_agents_env-statusline.cmd` 的绝对路径，
+     `command` 只写 `${GROK_HOME:-$HOME/.grok}/coding_agents_env-statusline.cmd` 的绝对路径，
      不加引号和 `&`（Grok 会把整段当成程序名，引号会触发 os error 123）。
      这个 `.cmd` 再调用 `bash.exe` 执行 `statusline.sh`。hook 命令不加 `&`，
      Grok 自己会补
