@@ -101,9 +101,15 @@ prepare_status_wrapper() {
     # chcp changes the console Grok shares with this child. An ASCII path does
     # not need it. A non-ASCII path is read as UTF-8, then the old page is
     # restored and bash's exit code is kept.
+    # Some locales print "850." so '.' is a delimiter. setlocal still copies
+    # the parent environment, so SAVED_CP and RC are cleared before parsing.
+    # %VAR: =% becomes a defined " =" when VAR is unset, so strip only a value.
     if [ "$paths" != "$stripped" ]; then
-      printf '%s\r\n' 'for /f "tokens=2 delims=:" %%A in ('"'"'chcp'"'"') do set "SAVED_CP=%%A"'
-      printf '%s\r\n' 'set "SAVED_CP=%SAVED_CP: =%"'
+      printf '%s\r\n' 'setlocal'
+      printf '%s\r\n' 'set "SAVED_CP="'
+      printf '%s\r\n' 'set "RC="'
+      printf '%s\r\n' 'for /f "tokens=2 delims=:." %%A in ('"'"'chcp'"'"') do set "SAVED_CP=%%A"'
+      printf '%s\r\n' 'if defined SAVED_CP set "SAVED_CP=%SAVED_CP: =%"'
       printf '%s\r\n' 'chcp 65001>nul'
     fi
     printf '%s\r\n' "\"${bash_w}\" \"${script_w}\""

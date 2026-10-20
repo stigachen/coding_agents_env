@@ -142,6 +142,8 @@ class InstallTest(unittest.TestCase):
             "    printf '%s\\n' 'C:/Git/git-local/bash.exe' ;;",
             "  *git-pf*)",
             "    printf '%s\\n' 'C:/Git/git-pf/bash.exe' ;;",
+            "  *nonascii-bash*|*张三*)",
+            "    printf '%s\\n' 'C:/Users/张三/Git/bin/bash.exe' ;;",
             "  *coding_agents_env-statusline.cmd*)",
             "    if [ -x /usr/bin/cygpath ]; then",
             "      /usr/bin/cygpath -m \"$path\"",
@@ -185,6 +187,7 @@ class InstallTest(unittest.TestCase):
         self.assertTrue(wrapper_text.endswith("\r\n"))
         self.assertNotIn("\n", wrapper_text.replace("\r\n", ""))
         self.assertNotIn("chcp", wrapper_text)
+        self.assertNotIn("setlocal", wrapper_text)
         first_text = config.read_text()
         # pwd -W expands an 8.3 directory such as RUNNER~1 to its long name.
         # Python keeps the spelling it was given. Both names are this file.
@@ -220,6 +223,32 @@ class InstallTest(unittest.TestCase):
         self.assertNotIn('"', command)
         self.assertNotIn("&", command)
         self.assertTrue(os.path.samefile(command, wrapper), (command, wrapper))
+
+    def test_windows_status_wrapper_saves_code_page_for_non_ascii_path(self):
+        self.use_windows_stubs()
+        bash_exe = self.root / "nonascii-bash" / "bash.exe"
+        bash_exe.parent.mkdir()
+        bash_exe.write_text("")
+        self.run_install(env={"CLAUDE_CODE_GIT_BASH_PATH": str(bash_exe)})
+        wrapper = self.grok_home / "coding_agents_env-statusline.cmd"
+        wrapper_text = wrapper.read_bytes().decode("utf-8")
+        expected = "\r\n".join([
+            "@echo off",
+            "setlocal",
+            'set "SAVED_CP="',
+            'set "RC="',
+            'for /f "tokens=2 delims=:." %%A in (\'chcp\') do set "SAVED_CP=%%A"',
+            'if defined SAVED_CP set "SAVED_CP=%SAVED_CP: =%"',
+            "chcp 65001>nul",
+            '"C:/Users/张三/Git/bin/bash.exe" '
+            '"C:/Users/O\'Brien/project/grok/statusline/statusline.sh"',
+            'set "RC=%ERRORLEVEL%"',
+            "if defined SAVED_CP chcp %SAVED_CP%>nul",
+            "exit /b %RC%",
+            "",
+        ])
+        self.assertEqual(wrapper_text, expected)
+        self.assertNotIn("\n", wrapper_text.replace("\r\n", ""))
 
     def test_windows_git_bash_search_skips_system32(self):
         self.use_windows_stubs()
