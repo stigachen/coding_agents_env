@@ -9,8 +9,10 @@ type = "command"
 command = "bash '/绝对路径/grok/statusline/statusline.sh'"
 ```
 
-Windows 上同一条是 `& 'C:/.../bash.exe' 'C:/.../grok/statusline/statusline.sh'`。
-Grok 的 hook 会自己补 PowerShell 的 `&`，状态栏不会，所以只有状态栏带这个前缀。
+Windows 上 `command` 只是 `${GROK_HOME:-$HOME/.grok}/coding_agents_env-statusline.cmd` 的绝对路径，
+没有引号，也没有参数。Grok 把这一整段当成程序名来启动。引号或前导 `&` 会留在
+文件名里，Windows 返回 os error 123。这个 `.cmd` 再调用 Git Bash 执行上面的
+脚本。Hook 命令不加 `&`，由 Grok 自己补。
 
 `git pull` 后脚本立即生效。`[ui.status_line]` 在 Grok 启动时读取，改表或刚安装
 之后要重启一次。仓库内的 `.grok/config.toml` 不能设置这一项。

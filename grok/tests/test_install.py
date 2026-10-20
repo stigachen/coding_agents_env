@@ -103,7 +103,7 @@ class InstallTest(unittest.TestCase):
         result = subprocess.run(
             [bash_exe(), "-c", command],
             input=json.dumps({"hook_event_name": "Stop", "reason": "end_turn", "cwd": "/tmp/project"}),
-            text=True, capture_output=True, timeout=5,
+            text=True, capture_output=True, timeout=20,
             env={**self.env, "NOTIFY_SKIP_WHEN_FOCUSED": "0", "NOTIFY_SHOW_HOST": "0"},
         )
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -142,6 +142,14 @@ class InstallTest(unittest.TestCase):
             "    printf '%s\\n' 'C:/Git/git-local/bash.exe' ;;",
             "  *git-pf*)",
             "    printf '%s\\n' 'C:/Git/git-pf/bash.exe' ;;",
+            "  *nonascii-bash*|*张三*)",
+            "    printf '%s\\n' 'C:/Users/张三/Git/bin/bash.exe' ;;",
+            "  *coding_agents_env-statusline.cmd*)",
+            "    if [ -x /usr/bin/cygpath ]; then",
+            "      /usr/bin/cygpath -m \"$path\"",
+            "    else",
+            "      printf '%s\\n' \"$path\"",
+            "    fi ;;",
             "  *)",
             "    printf '%s\\n' 'C:/Program Files/Git/bin/bash.exe' ;;",
             "esac",
@@ -167,13 +175,80 @@ class InstallTest(unittest.TestCase):
                 self.assertEqual(data["hooks"][event][0]["hooks"][0]["command"], expected)
                 self.assertNotIn("matcher", data["hooks"][event][0])
         config = self.grok_home / "config.toml"
-        status = "& 'C:/Git/git-preferred/bash.exe' 'C:/Users/O''Brien/project/grok/statusline/statusline.sh'"
+        wrapper = self.grok_home / "coding_agents_env-statusline.cmd"
+        self.assertTrue(wrapper.is_file())
+        # read_text() translates \r\n to \n, so check the bytes the installer wrote.
+        wrapper_text = wrapper.read_bytes().decode("utf-8")
+        self.assertIn('"C:/Git/git-preferred/bash.exe"', wrapper_text)
+        self.assertIn(
+            "\"C:/Users/O'Brien/project/grok/statusline/statusline.sh\"",
+            wrapper_text,
+        )
+        self.assertTrue(wrapper_text.endswith("\r\n"))
+        self.assertNotIn("\n", wrapper_text.replace("\r\n", ""))
+        self.assertNotIn("chcp", wrapper_text)
+        self.assertNotIn("setlocal", wrapper_text)
         first_text = config.read_text()
-        self.assertIn('command = "' + status + '"', first_text)
+        # pwd -W expands an 8.3 directory such as RUNNER~1 to its long name.
+        # Python keeps the spelling it was given. Both names are this file.
+        match = re.search(r'(?m)^command = "(.*)"$', first_text)
+        self.assertIsNotNone(match, first_text)
+        command = match.group(1)
+        self.assertTrue(os.path.samefile(command, wrapper), (command, wrapper))
+        self.assertNotIn("&", command)
+        self.assertNotIn('"', command)
+        self.assertNotIn("'", command)
         again = self.run_install(env=env)
         self.assertNotIn("接管", again.stderr)
         self.assertEqual(config.read_text(), first_text)
         self.assertEqual(json.loads(self.hooks.read_text()), data)
+
+    def test_windows_status_command_keeps_a_path_with_spaces(self):
+        self.use_windows_stubs()
+        bash_exe = self.root / "git-preferred" / "bash.exe"
+        bash_exe.parent.mkdir()
+        bash_exe.write_text("")
+        grok_home = self.home / "Grok Home"
+        self.run_install(env={
+            "CLAUDE_CODE_GIT_BASH_PATH": str(bash_exe),
+            "GROK_HOME": str(grok_home),
+        })
+        wrapper = grok_home / "coding_agents_env-statusline.cmd"
+        self.assertTrue(wrapper.is_file())
+        text = (grok_home / "config.toml").read_text()
+        match = re.search(r'(?m)^command = "(.*)"$', text)
+        self.assertIsNotNone(match, text)
+        command = match.group(1)
+        self.assertIn("Grok Home", command)
+        self.assertNotIn('"', command)
+        self.assertNotIn("&", command)
+        self.assertTrue(os.path.samefile(command, wrapper), (command, wrapper))
+
+    def test_windows_status_wrapper_saves_code_page_for_non_ascii_path(self):
+        self.use_windows_stubs()
+        bash_exe = self.root / "nonascii-bash" / "bash.exe"
+        bash_exe.parent.mkdir()
+        bash_exe.write_text("")
+        self.run_install(env={"CLAUDE_CODE_GIT_BASH_PATH": str(bash_exe)})
+        wrapper = self.grok_home / "coding_agents_env-statusline.cmd"
+        wrapper_text = wrapper.read_bytes().decode("utf-8")
+        expected = "\r\n".join([
+            "@echo off",
+            "setlocal",
+            'set "SAVED_CP="',
+            'set "RC="',
+            'for /f "tokens=2 delims=:." %%A in (\'chcp\') do set "SAVED_CP=%%A"',
+            'if defined SAVED_CP set "SAVED_CP=%SAVED_CP: =%"',
+            "chcp 65001>nul",
+            '"C:/Users/张三/Git/bin/bash.exe" '
+            '"C:/Users/O\'Brien/project/grok/statusline/statusline.sh"',
+            'set "RC=%ERRORLEVEL%"',
+            "if defined SAVED_CP chcp %SAVED_CP%>nul",
+            "exit /b %RC%",
+            "",
+        ])
+        self.assertEqual(wrapper_text, expected)
+        self.assertNotIn("\n", wrapper_text.replace("\r\n", ""))
 
     def test_windows_git_bash_search_skips_system32(self):
         self.use_windows_stubs()

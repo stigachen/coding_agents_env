@@ -47,9 +47,11 @@ class NotifyTest(unittest.TestCase):
         event.update(overrides)
         for key in omit:
             event.pop(key, None)
+        # Git Bash plus jq on a busy Windows runner can take longer than 5s
+        # without being stuck. A real hang still fails this limit.
         result = subprocess.run(
             [bash_exe(), str(HOOK)], input=json.dumps(event),
-            text=True, capture_output=True, env=self.env, timeout=5,
+            text=True, capture_output=True, env=self.env, timeout=20,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stderr, "")
